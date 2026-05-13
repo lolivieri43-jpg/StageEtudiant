@@ -8,6 +8,12 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
+    // Avoid harmless 401 noise: only call /me if a token or session cookie likely exists
+    if (!localStorage.getItem("token") && !document.cookie.includes("session_token")) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
