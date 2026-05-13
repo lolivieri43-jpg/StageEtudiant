@@ -1,0 +1,114 @@
+{
+  "project_name": "Stage / Alternance Platform",
+  "theme": "Light",
+  "archetype": "Soft Utility (Archetype 3 & 4 Blend)",
+  "design_philosophy": {
+    "description": "A hybrid design bridging the professional trust of LinkedIn with the dynamic, youthful energy of Welcome to the Jungle. The interface balances high-density information for companies with an approachable, modern, and tactile experience for Gen Z candidates.",
+    "core_principles": [
+      "Trust & Vibrancy: Professional structural foundation mixed with energetic color accents.",
+      "Cardless When Possible: Reduce nested boxes. Use generous negative space and subtle borders.",
+      "Tactile Surfaces: Very light shadows combined with rounded elements (rounded-2xl) for a physical feel.",
+      "Optical Alignment: Elements must flow naturally; prioritize left-alignment for dense text and center-alignment for hero calls-to-action."
+    ]
+  },
+  "color_palette": {
+    "primary_blue": {
+      "base": "#2563EB",
+      "hover": "#1D4ED8",
+      "surface": "#EFF6FF",
+      "usage": "Primary buttons, trusted professional actions, active tabs."
+    },
+    "modern_purple": {
+      "base": "#8B5CF6",
+      "hover": "#7C3AED",
+      "surface": "#F5F3FF",
+      "usage": "Accents, youth-focused features, tags, highlights, and secondary calls-to-action."
+    },
+    "status_green": {
+      "base": "#10B981",
+      "indicator": "#34D399",
+      "usage": "Online status in messaging, active available candidate status, success toasts."
+    },
+    "neutrals": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "border": "#E2E8F0",
+      "text_main": "#0F172A",
+      "text_muted": "#64748B",
+      "text_light": "#94A3B8"
+    }
+  },
+  "typography": {
+    "strategy": "The Anti-Default Rule applies. We reject standard 'Inter' for headings to avoid a generic SaaS look. Instead, we use Outfit for friendly but professional headings, and Figtree for crisp data density.",
+    "fonts": {
+      "heading": "Outfit, sans-serif",
+      "body": "Figtree, sans-serif"
+    },
+    "hierarchy": {
+      "h1_hero": "text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-900",
+      "h2_section": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900",
+      "h3_card": "text-lg sm:text-xl font-bold tracking-tight text-slate-900",
+      "body_main": "text-base font-medium text-slate-600 leading-relaxed",
+      "body_small": "text-sm font-medium text-slate-500",
+      "labels": "text-xs font-bold uppercase tracking-[0.15em] text-slate-500"
+    }
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "Generous padding is mandatory. p-6, p-8, and p-12 should be prioritized over p-4.",
+    "bento_grid": "For dashboard and profile sections, use the 'Control Room' grid with tight gaps (gap-6) but generous internal card padding (p-8).",
+    "radius": "Use rounded-2xl or rounded-3xl for cards and buttons to evoke a friendly, modern feel.",
+    "shadows": "shadow-[0_8px_30px_rgb(0,0,0,0.04)] for floating elements. Avoid harsh, dark shadows."
+  },
+  "components_strategy": {
+    "navigation": {
+      "style": "Fixed top bar, Crystal Glassmorphism (backdrop-blur-xl bg-white/80 border-b border-slate-200).",
+      "elements": "Logo, Central Search Bar, Navigation Links, Profile Avatar / CTA, Notifications."
+    },
+    "hero_section": {
+      "style": "Text-heavy with asymmetric layout or dynamic bento grid. Use modern purple and professional blue abstract SVG blobs or gradients blurred in the background.",
+      "slogan": "Trouve ton stage ou ton alternance près de chez toi"
+    },
+    "search_and_filters": {
+      "style": "Centralized large input field (rounded-full) with high contrast. Sidebar filters use clean toggles and checkboxes (Shadcn customized)."
+    },
+    "interactive_map": {
+      "library": "react-simple-maps or standard SVG France map",
+      "style": "Clean geometric rendering. Regions highlighted in soft blue/purple depending on data density. Tooltips on hover with company counts."
+    },
+    "social_feed": {
+      "style": "Facebook-style but polished. Flat cards (rounded-2xl) with 1px border. Composer at the top. Engagement buttons (Like, Comment, Share) using minimal outlined icons."
+    },
+    "profiles": {
+      "style": "LinkedIn-style but younger. Large cover photo, overlapping avatar (border-4 border-white). Clean sections for skills, experience, and 'About Me'."
+    },
+    "messaging": {
+      "style": "Split pane (List on left, Chat on right). Online indicators using status_green. Chat bubbles in primary_blue (outgoing) and surface/grey (incoming)."
+    }
+  },
+  "interactions_and_motion": {
+    "hover_states": "Buttons use -translate-y-0.5 and subtle shadow increase. Text colors explicitly defined on hover to maintain contrast.",
+    "transitions": "transition-all duration-200 ease-out",
+    "testing": "All interactive elements MUST include data-testid attributes (e.g., data-testid='apply-button', data-testid='search-input')."
+  },
+  "icons_and_assets": {
+    "icon_library": "@phosphor-icons/react (Duotone weight for marketing, Regular for dashboard) or lucide-react if constrained.",
+    "images": {
+      "hero_diverse_professionals": "https://images.unsplash.com/photo-1758691736975-9f7f643d178e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHwzfHxkaXZlcnNlJTIweW91bmclMjBwcm9mZXNzaW9uYWxzJTIwbW9kZXJuJTIwb2ZmaWNlfGVufDB8fHx8MTc3ODY5Mjg3MHww&ixlib=rb-4.1.0&q=85",
+      "avatar_1": "https://images.unsplash.com/photo-1778014104491-981d197134e5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHlvdW5nJTIwYWR1bHR8ZW58MHx8fHwxNzc4NjkyODcwfDA&ixlib=rb-4.1.0&q=85",
+      "avatar_2": "https://images.unsplash.com/photo-1762753674498-73ec49feafc4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHlvdW5nJTIwYWR1bHR8ZW58MHx8fHwxNzc4NjkyODcwfDA&ixlib=rb-4.1.0&q=85",
+      "avatar_3": "https://images.unsplash.com/photo-1771898343647-bd979ad8cca5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHlvdW5nJTIwYWR1bHR8ZW58MHx8fHwxNzc4NjkyODcwfDA&ixlib=rb-4.1.0&q=85",
+      "avatar_4": "https://images.unsplash.com/photo-1762522921456-cdfe882d36c3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHlvdW5nJTIwYWR1bHR8ZW58MHx8fHwxNzc4NjkyODcwfDA&ixlib=rb-4.1.0&q=85",
+      "company_logo_1": "https://images.unsplash.com/photo-1770012977129-19f856a1f935?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwzfHx0ZWNoJTIwY29tcGFueSUyMGxvZ28lMjBtaW5pbWFsaXN0fGVufDB8fHx8MTc3ODY5Mjg3MHww&ixlib=rb-4.1.0&q=85",
+      "company_logo_2": "https://images.unsplash.com/photo-1761044591996-7a05341a3e12?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHx0ZWNoJTIwY29tcGFueSUyMGxvZ28lMjBtaW5pbWFsaXN0fGVufDB8fHx8MTc3ODY5Mjg3MHww&ixlib=rb-4.1.0&q=85",
+      "company_logo_3": "https://images.unsplash.com/photo-1770210217380-d78a69acdc77?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHx0ZWNoJTIwY29tcGFueSUyMGxvZ28lMjBtaW5pbWFsaXN0fGVufDB8fHx8MTc3ODY5Mjg3MHww&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "implementation_instructions": [
+    "Use standard HTML tags augmented heavily with Tailwind classes for layout structures (do not rely purely on Shadcn Sections or Cards for marketing pages).",
+    "Integrate Shadcn primitives (Input, Button, DropdownMenu, Tabs, Dialog) for forms, the central search bar, filter sidebars, and interactive modals. Adjust their border radii to rounded-2xl to match the youth vibe.",
+    "For the France map, you may use SVG path mapping with d3-geo or react-simple-maps, mapping regions and using hover states to show 'XX Companies Recruiting'.",
+    "Never use pure black or pure grey. Background is #F8FAFC. Main text is #0F172A.",
+    "Implement the Facebook-style social feed with dynamic post layout, utilizing real images from the assets provided and ensuring data-testids exist on every action button (like, comment, share, apply).",
+    "Profile pages should combine standard dashboard utility (for editing info) with a clean, public-facing aesthetic (for viewing)."
+  ]
+}
