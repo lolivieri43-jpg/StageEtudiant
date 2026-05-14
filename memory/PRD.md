@@ -25,6 +25,21 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 5 (2026-02) — Photos PC, Premium, Bug fixes, Indexes
+- ✅ **Carte interactive France retirée** (remplacée par chips de régions avec compteurs d'offres)
+- ✅ **Upload photo de profil** (`/api/me/avatar`) avec compression Pillow auto à 512×512 JPEG q85, formats acceptés JPG/PNG/WebP
+- ✅ **Upload bannière** (`/api/me/banner`) compression à 1600×600 JPEG q82
+- ✅ **Avatars/bannières servies publiquement** (sans token) pour permettre l'affichage dans `<img src>`
+- ✅ **Suppression photo/bannière** via DELETE
+- ✅ **Cascade rename entreprise** : `/api/profile-v2` met à jour `users.name` + propagate à `offers.company_name`, `applications.company_name`, `posts.author_name`, `comments.author_name`, `messages.from_name`/`to_name`
+- ✅ **Sécurité** : whitelist des champs dans `/profile-v2` — impossible d'écrire `is_premium`, `verified`, etc. en dehors des endpoints admin
+- ✅ **Featured candidates** : `/api/candidates/featured` — random + premium en priorité (50% des slots), badge "Premium" amber sur les cartes
+- ✅ **Système premium étudiant** : `is_premium`, `premium_start_date`, `premium_end_date`, `premium_status`
+- ✅ **Admin grant premium** : `POST /admin/grant-premium/{user_id}?days=N` + bouton dans /admin
+- ✅ **Mongo indexes** : offers(city/region/source/status/contract_type/created_at/company_id), users(role/region/city/is_premium), applications(candidate/company/status), messages(conv+created/to+read), deals(status/author), notifications(user+created)
+- ✅ **Vraie API France Travail** : OAuth2 client_credentials + endpoint `/partenaire/offresdemploi/v2/offres/search` (fallback simulation si `FRANCE_TRAVAIL_CLIENT_ID/SECRET` absents)
+- ✅ **Tests** : 17/18 backend pass · 2 fixes critiques (privacy fichiers avatars + faille security profile-v2)
+
 ## Iteration 4 (2026-02) — Phase B : Distance, Temps réel WebSocket, Connecteurs externes
 - ✅ **Géocodage** : table statique de 50+ villes françaises → coordonnées GPS, formule de Haversine
 - ✅ **Recherche par rayon** : `/api/offers-nearby?city=Paris&distance_km=80` retourne les offres triées par distance, avec badge "km" sur chaque carte

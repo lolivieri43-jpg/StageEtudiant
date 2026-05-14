@@ -1377,6 +1377,10 @@ async def download_file(file_id: str, request: Request, auth: Optional[str] = Qu
     rec = await db.files.find_one({"file_id": file_id, "is_deleted": False}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Fichier introuvable")
+    # Avatars and banners are PUBLIC (need to be loadable from <img src> without auth)
+    if rec.get("kind") in ("avatar", "banner"):
+        data, ct = get_object(rec["storage_path"])
+        return FResponse(content=data, media_type=rec.get("content_type", ct))
     # Find document/photo reference if any
     student_doc = await db.student_documents.find_one({"file_id": file_id}, {"_id": 0})
     gallery_photo = await db.company_photos.find_one({"file_id": file_id}, {"_id": 0})
@@ -2233,11 +2237,24 @@ async def remove_banner(user=Depends(get_current_user)):
 # ============ ITERATION 5: CASCADING UPDATES FOR COMPANY NAME ============
 @api.put("/profile-v2")
 async def update_profile_cascade(data: dict, user=Depends(get_current_user)):
-    """Like /profile PUT, but cascades critical fields (name) to authored content."""
+    """Like /profile PUT, but cascades critical fields (name) to authored content.
+    Whitelists allowed fields to prevent privilege escalation (e.g. self-granting premium)."""
+    CANDIDATE_FIELDS = {
+        "first_name", "last_name", "title", "avatar", "banner", "city", "region",
+        "school", "level", "domain", "contract_type", "duration", "availability",
+        "skills", "experiences", "description", "cv_url", "portfolio_url",
+        "linkedin_url", "status", "mobile",
+    }
+    COMPANY_FIELDS = {
+        "company_name", "logo", "banner", "sector", "size", "address", "city",
+        "region", "siret", "website", "description", "hr_contact", "pro_email",
+        "phone", "recruiting_domains", "company_status",
+    }
+    allowed = COMPANY_FIELDS if user["role"] == "company" else CANDIDATE_FIELDS
     profile = user.get("profile", {})
-    profile.update({k: v for k, v in data.items() if v is not None})
+    safe_updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    profile.update(safe_updates)
     set_doc = {"profile": profile}
-    # If company name changed, cascade and also update root `name`
     if user["role"] == "company":
         new_name = profile.get("company_name")
         if new_name and new_name != user.get("name"):
@@ -2264,16 +2281,19 @@ async def featured_candidates(limit: int = 12):
     valid_premium = []
     for p in premium:
         end = p.get("profile", {}).get("premium_end_date")
-        if end:
-            try:
-                end_dt = datetime.fromisoformat(end)
-                if end_dt.tzinfo is None: end_dt = end_dt.replace(tzinfo=timezone.utc)
-                if end_dt > now:
-                    valid_premium.append(p)
-                    continue
-            except Exception:
-                pass
-        valid_premium.append(p)
+        if not end:
+            # Premium but no end date: still valid
+            valid_premium.append(p)
+            continue
+        try:
+            end_dt = datetime.fromisoformat(end)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if end_dt > now:
+                valid_premium.append(p)
+        except Exception:
+            # Bad date format → skip premium status, treat as regular
+            continue
     random.shuffle(valid_premium)
     random.shuffle(regular)
     n_prem = min(len(valid_premium), max(1, limit // 2)) if valid_premium else 0
