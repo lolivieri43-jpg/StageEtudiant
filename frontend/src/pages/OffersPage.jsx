@@ -47,12 +47,9 @@ export default function OffersPage() {
     if (domain) p.set("domain", domain);
     if (level) p.set("level", level);
     if (remote) p.set("remote", "true");
-    p.set("limit", "100");
-    api.get(`/offers?${p.toString()}`).then((r) => {
-      let data = r.data;
-      if (source) data = data.filter((o) => (o.source || "StageConnect") === source);
-      setOffers(data);
-    }).finally(() => setLoading(false));
+    if (source) p.set("source", source);
+    p.set("limit", "300");
+    api.get(`/offers?${p.toString()}`).then((r) => setOffers(r.data)).finally(() => setLoading(false));
   }, [q, region, city, ct, domain, level, remote, source]);
 
   const updateParam = (k, v) => {

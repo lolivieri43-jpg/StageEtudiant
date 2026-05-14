@@ -342,7 +342,8 @@ async def list_offers(
     level: Optional[str] = None,
     remote: Optional[bool] = None,
     company_id: Optional[str] = None,
-    limit: int = 50,
+    source: Optional[str] = None,
+    limit: int = 200,
 ):
     query = {}
     if q:
@@ -358,7 +359,8 @@ async def list_offers(
     if level: query["level"] = level
     if remote is not None: query["remote"] = remote
     if company_id: query["company_id"] = company_id
-    offers = await db.offers.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    if source: query["source"] = source
+    offers = await db.offers.find(query, {"_id": 0}).sort("created_at", -1).limit(min(limit, 500)).to_list(min(limit, 500))
     return offers
 
 @api.get("/offers/regions")
@@ -1368,10 +1370,54 @@ async def upload_file(file: UploadFile = File(...), kind: str = "doc", user=Depe
     return doc
 
 @api.get("/files/{file_id}")
-async def download_file(file_id: str, auth: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+async def download_file(file_id: str, request: Request, auth: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
     rec = await db.files.find_one({"file_id": file_id, "is_deleted": False}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Fichier introuvable")
+    # Find document/photo reference if any
+    student_doc = await db.student_documents.find_one({"file_id": file_id}, {"_id": 0})
+    gallery_photo = await db.company_photos.find_one({"file_id": file_id}, {"_id": 0})
+    # Gallery photos are public by default
+    if gallery_photo:
+        data, ct = get_object(rec["storage_path"])
+        return FResponse(content=data, media_type=rec.get("content_type", ct))
+    # For documents with visibility, validate access
+    if student_doc:
+        owner_id = student_doc["user_id"]
+        visibility = student_doc.get("visibility", "after_application")
+        if visibility == "public":
+            data, ct = get_object(rec["storage_path"])
+            return FResponse(content=data, media_type=rec.get("content_type", ct))
+        # Need authenticated caller
+        try:
+            req_user = await get_current_user(request)
+        except HTTPException:
+            raise HTTPException(401, "Authentification requise pour ce document")
+        if req_user["user_id"] == owner_id:
+            data, ct = get_object(rec["storage_path"])
+            return FResponse(content=data, media_type=rec.get("content_type", ct))
+        if visibility == "connected":
+            has_contact = await db.contacts.find_one({"$or": [
+                {"user_a": owner_id, "user_b": req_user["user_id"]},
+                {"user_a": req_user["user_id"], "user_b": owner_id},
+            ]})
+            if not has_contact:
+                raise HTTPException(403, "Document réservé aux contacts")
+        elif visibility == "after_application":
+            ap = await db.applications.find_one({"candidate_id": owner_id, "company_id": req_user["user_id"]})
+            if not ap:
+                raise HTTPException(403, "Document accessible après candidature")
+        else:  # private
+            raise HTTPException(403, "Document privé")
+        data, ct = get_object(rec["storage_path"])
+        return FResponse(content=data, media_type=rec.get("content_type", ct))
+    # No reference: only file owner can download
+    try:
+        req_user = await get_current_user(request)
+        if req_user["user_id"] != rec["user_id"]:
+            raise HTTPException(403, "Accès refusé")
+    except HTTPException:
+        raise HTTPException(401, "Authentification requise")
     data, ct = get_object(rec["storage_path"])
     return FResponse(content=data, media_type=rec.get("content_type", ct))
 
@@ -1593,6 +1639,9 @@ async def remove_contact(contact_user_id: str, user=Depends(get_current_user)):
 
 @api.post("/contacts/block/{target_id}")
 async def block_user(target_id: str, user=Depends(get_current_user)):
+    existing = await db.blocked_users.find_one({"blocker_id": user["user_id"], "blocked_id": target_id})
+    if existing:
+        return {"ok": True, "already_blocked": True}
     await db.blocked_users.insert_one({
         "block_id": f"b_{uuid.uuid4().hex[:10]}",
         "blocker_id": user["user_id"], "blocked_id": target_id,

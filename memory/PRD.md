@@ -25,6 +25,24 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 3 (2026-02) — Multi-source + Massive seed + Profils enrichis + Apps détaillées
+- ✅ Seed massif : 110 entreprises fictives + 320 offres (mix interne StageConnect + 12 sources externes : HelloWork, LinkedIn, Indeed, Welcome to the Jungle, France Travail, JobTeaser, StudentJob, L'Étudiant, Apec, Meteojob, Monster, Talent.com)
+- ✅ Badges rouges visibles sur chaque offre indiquant l'origine
+- ✅ Offres externes redirigent vers le site source (cible _blank)
+- ✅ Filtre source côté backend (`/api/offers?source=...`) + dropdown frontend
+- ✅ Carte de France : version mobile avec toggle Liste/Carte/Filtres
+- ✅ Page "Rechercher un étudiant" (entreprises) avec filtres nom/niveau/domaine/ville/compétence/statut
+- ✅ Page détail candidature (`/applications/:id`) avec téléchargement CV/lettre/convention, note interne, statuts étendus (vue / en_analyse / entretien_propose / acceptée / refusée / archivée), retrait par étudiant
+- ✅ Documents étudiants multiples (CV, lettre, convention, portfolio) avec visibilité (privé / connectés / après_candidature / public)
+- ✅ Galerie photos entreprise avec upload via stockage objet Emergent
+- ✅ Upload de fichiers réel via Emergent Object Storage (`/api/upload`, `/api/files/:id`)
+- ✅ Privacy: téléchargement de fichiers contrôlé par règles de visibilité côté serveur
+- ✅ Offres sauvegardées (`/saved-offers`) + toggle bouton
+- ✅ Statuts enrichis : étudiant (en_recherche/à_l_écoute/déjà_trouvé/non_disponible) + entreprise (recrute_stagiaire/recrute_alternant/recrute_les_deux/pas_de_recrutement)
+- ✅ Contact lifecycle complet : status none→sent→connected→removed→blocked, annulation invitation, suppression contact, blocage
+- ✅ Bouton dynamique sur profil selon contact_status
+- ✅ Tests : 66/66 backend pass + 2 fixes critiques appliqués (privacy fichiers + ownership upload + idempotence block)
+
 ## Implemented (2026-02 — initial MVP)
 - ✅ Landing page (hero, search, carte France SVG 13 régions, latest offers, top companies, candidates, CTA)
 - ✅ Auth JWT (register, login, me, logout) + Emergent Google OAuth (/auth/session, AuthCallback)
