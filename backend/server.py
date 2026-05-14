@@ -1235,7 +1235,11 @@ async def payment_status(session_id: str, request: Request):
         raise HTTPException(500, "Stripe indisponible")
     host_url = str(request.base_url).rstrip("/")
     stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
-    res = await stripe_co.get_checkout_status(session_id)
+    try:
+        res = await stripe_co.get_checkout_status(session_id)
+    except Exception as e:
+        logger.warning(f"Stripe status fetch failed for {session_id}: {e}")
+        return tx
     new_status = res.payment_status
     upd = {"payment_status": new_status, "status": res.status}
     await db.payment_transactions.update_one({"session_id": session_id}, {"$set": upd})

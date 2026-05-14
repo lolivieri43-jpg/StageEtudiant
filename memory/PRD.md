@@ -39,6 +39,18 @@ Build a modern, professional, responsive French platform connecting companies wi
 - ✅ Admin: stats globales, liste users, vérification entreprise
 - ✅ Seed automatique: 1 admin, 10 entreprises, 12 candidats, 12 offres, 6 publications
 
+## Iteration 2 (2026-02) — Espace Bons Plans + Monétisation Stripe
+- ✅ Bons plans CRUD avec catégories (food, sport, culture, transport, study, fashion, tech)
+- ✅ Étudiants: publication GRATUITE avec validation admin obligatoire (status=pending → published)
+- ✅ Entreprises: publication réservée aux abonnés Pro Bons Plans (HTTP 402 sinon)
+- ✅ Abonnement Pro Bons Plans: 1€/mois ou 10€/an via Stripe Checkout
+- ✅ Boosts: 1€/7j étudiant (boosted_until) + 10€/7j entreprise (sponsored_until)
+- ✅ Page /deals avec sections triées: Sponsorisés → Mis en avant → Tous
+- ✅ Page /deals/mine: gestion publications + sauvegardés + historique boosts/factures
+- ✅ Stripe Checkout sécurisé (packages côté backend, URLs dynamiques, polling status, webhook)
+- ✅ Espace admin Monétisation: revenus totaux/par type, modération bons plans en attente, transactions
+- ✅ Tracking: vues, clics (CTA tracking), sauvegardes, partages
+
 ## Backlog (P1/P2 — for next iterations)
 ### P1 — Important
 - Upload de fichiers (CV, logos, photos) via stockage objet Emergent
