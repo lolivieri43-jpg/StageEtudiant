@@ -17,10 +17,19 @@ export default function OfferDetailPage() {
   const [applyOpen, setApplyOpen] = useState(false);
   const [letter, setLetter] = useState("");
   const [applying, setApplying] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api.get(`/offers/${id}`).then((r) => setOffer(r.data)).catch(() => navigate("/offers"));
-  }, [id, navigate]);
+    if (user) api.get("/saved-offers").then((r) => setSaved(r.data.some(o => o.offer_id === id))).catch(() => {});
+  }, [id, navigate, user]);
+
+  const toggleSave = async () => {
+    if (!user) { navigate("/login"); return; }
+    const { data } = await api.post(`/saved-offers/${id}`);
+    setSaved(data.saved);
+    toast.success(data.saved ? "Offre sauvegardée" : "Offre retirée");
+  };
 
   const apply = async () => {
     if (!user) { navigate("/login"); return; }
@@ -68,7 +77,7 @@ export default function OfferDetailPage() {
                 <Send className="w-4 h-4 mr-1" />Postuler
               </Button>
             )}
-            <Button variant="outline" className="rounded-full" data-testid="save-offer-btn"><Bookmark className="w-4 h-4 mr-1" />Sauvegarder</Button>
+            <Button variant={saved ? "default" : "outline"} onClick={toggleSave} className="rounded-full" data-testid="save-offer-btn"><Bookmark className={`w-4 h-4 mr-1 ${saved ? "fill-current" : ""}`} />{saved ? "Sauvegardée" : "Sauvegarder"}</Button>
             <Link to={`/profile/${offer.company_id}`}><Button variant="outline" className="rounded-full"><Building2 className="w-4 h-4 mr-1" />Voir l'entreprise</Button></Link>
             <span className="ml-auto text-sm text-slate-400 flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{offer.views} vues</span>
           </div>

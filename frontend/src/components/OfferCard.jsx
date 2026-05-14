@@ -1,20 +1,37 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { MapPin, Clock, Briefcase, CheckCircle2, Wifi } from "lucide-react";
+import { MapPin, Clock, Briefcase, CheckCircle2, Wifi, ExternalLink } from "lucide-react";
 import { Badge } from "./ui/badge";
 
+const SOURCE_LABELS = {
+  StageConnect: "StageConnect",
+  HelloWork: "HelloWork",
+  LinkedIn: "LinkedIn",
+  Indeed: "Indeed",
+  WelcomeToTheJungle: "WTTJ",
+  FranceTravail: "France Travail",
+  JobTeaser: "JobTeaser",
+  StudentJob: "StudentJob",
+  LEtudiant: "L'Étudiant",
+  Apec: "Apec",
+  Meteojob: "Meteojob",
+  Monster: "Monster",
+  TalentCom: "Talent.com",
+};
+
 export default function OfferCard({ offer }) {
-  return (
-    <Link
-      to={`/offers/${offer.offer_id}`}
-      data-testid={`offer-card-${offer.offer_id}`}
-      className="card-soft p-5 block hover-lift hover:border-blue-300"
-    >
+  const isExternal = offer.source && offer.source !== "StageConnect" && offer.external_url;
+  const sourceLabel = SOURCE_LABELS[offer.source] || offer.source || "StageConnect";
+  const inner = (
+    <>
+      <div className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shadow-sm" data-testid={`source-badge-${offer.offer_id}`}>
+        {sourceLabel}
+      </div>
       <div className="flex items-start gap-4">
         <div className="w-12 h-12 rounded-xl bg-slate-100 overflow-hidden shrink-0 grid place-items-center text-slate-400 font-bold">
           {offer.company_logo ? <img src={offer.company_logo} className="w-full h-full object-cover" alt="" /> : offer.company_name?.[0]}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pr-20">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-semibold text-slate-700 truncate">{offer.company_name}</span>
             {offer.verified && <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0" />}
@@ -38,6 +55,24 @@ export default function OfferCard({ offer }) {
           </div>
         </div>
       </div>
+      {isExternal && (
+        <div className="mt-3 text-xs text-red-600 font-semibold flex items-center gap-1">
+          <ExternalLink className="w-3 h-3" />Ouvrir sur {sourceLabel}
+        </div>
+      )}
+    </>
+  );
+
+  if (isExternal) {
+    return (
+      <a href={offer.external_url} target="_blank" rel="noopener noreferrer" className="card-soft p-5 block hover-lift hover:border-red-300 relative" data-testid={`offer-card-${offer.offer_id}`}>
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <Link to={`/offers/${offer.offer_id}`} data-testid={`offer-card-${offer.offer_id}`} className="card-soft p-5 block hover-lift hover:border-blue-300 relative">
+      {inner}
     </Link>
   );
 }

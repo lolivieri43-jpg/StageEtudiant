@@ -66,7 +66,7 @@ export default function DashboardPage() {
               <Section title="Candidatures récentes">
                 <div className="space-y-3">
                   {(data?.recent_applications || []).map(a => (
-                    <div key={a.app_id} className="card-soft p-4 flex items-center gap-3" data-testid={`application-row-${a.app_id}`}>
+                    <Link to={`/applications/${a.app_id}`} key={a.app_id} className="card-soft p-4 flex items-center gap-3 hover-lift" data-testid={`application-row-${a.app_id}`}>
                       <div className="w-10 h-10 rounded-full bg-slate-200 overflow-hidden grid place-items-center font-bold text-slate-500 shrink-0">
                         {a.candidate_avatar ? <img src={a.candidate_avatar} className="w-full h-full object-cover" alt="" /> : a.candidate_name[0]}
                       </div>
@@ -75,7 +75,7 @@ export default function DashboardPage() {
                         <div className="text-xs text-slate-500 truncate">{a.offer_title}</div>
                       </div>
                       <StatusBadge status={a.status} />
-                    </div>
+                    </Link>
                   ))}
                   {(!data || data.recent_applications.length === 0) && <Empty msg="Aucune candidature" />}
                 </div>
@@ -99,7 +99,7 @@ export default function DashboardPage() {
               <Section title="Mes candidatures">
                 <div className="space-y-3">
                   {(data?.applications || []).map(a => (
-                    <Link to={`/offers/${a.offer_id}`} key={a.app_id} className="card-soft p-4 flex items-center gap-3 hover-lift" data-testid={`my-app-${a.app_id}`}>
+                    <Link to={`/applications/${a.app_id}`} key={a.app_id} className="card-soft p-4 flex items-center gap-3 hover-lift" data-testid={`my-app-${a.app_id}`}>
                       <Briefcase className="w-5 h-5 text-slate-400" />
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-slate-900 truncate">{a.offer_title}</div>

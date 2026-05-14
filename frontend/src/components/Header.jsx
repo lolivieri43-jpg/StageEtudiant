@@ -101,6 +101,8 @@ export default function Header() {
                 <DropdownMenuItem onClick={() => navigate("/dashboard")} data-testid="menu-dashboard"><LayoutDashboard className="w-4 h-4 mr-2" />Tableau de bord</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate(`/profile/${user.user_id}`)} data-testid="menu-profile"><User className="w-4 h-4 mr-2" />Mon profil</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate("/deals/mine")} data-testid="menu-mydeals"><Tag className="w-4 h-4 mr-2" />Mes bons plans</DropdownMenuItem>
+                {user.role === "candidate" && <DropdownMenuItem onClick={() => navigate("/saved-offers")} data-testid="menu-saved">Offres sauvegardées</DropdownMenuItem>}
+                {user.role === "company" && <DropdownMenuItem onClick={() => navigate("/search/students")} data-testid="menu-search-students">Rechercher des étudiants</DropdownMenuItem>}
                 <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-settings">Paramètres</DropdownMenuItem>
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">Administration</DropdownMenuItem>}
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/monetization")} data-testid="menu-monetization">Monétisation</DropdownMenuItem>}

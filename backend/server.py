@@ -1300,6 +1300,503 @@ async def admin_monetization(user=Depends(get_current_user)):
 
 
 
+# ============ EXTENSIONS v3: STORAGE, MULTI-SOURCE OFFERS, DOCS, GALLERY, SEARCH ============
+from fastapi import UploadFile, File, Query, Header, Response as FResponse
+import io
+
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = os.environ.get("APP_NAME", "stagiaireconnect")
+_storage_key = None
+
+def init_storage():
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    if not EMERGENT_KEY:
+        raise HTTPException(500, "Storage non configuré")
+    r = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+    r.raise_for_status()
+    _storage_key = r.json()["storage_key"]
+    return _storage_key
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    r = requests.put(f"{STORAGE_URL}/objects/{path}",
+                     headers={"X-Storage-Key": key, "Content-Type": content_type},
+                     data=data, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+def get_object(path: str):
+    key = init_storage()
+    r = requests.get(f"{STORAGE_URL}/objects/{path}",
+                     headers={"X-Storage-Key": key}, timeout=60)
+    r.raise_for_status()
+    return r.content, r.headers.get("Content-Type", "application/octet-stream")
+
+MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
+        "webp": "image/webp", "pdf": "application/pdf"}
+
+@api.post("/upload")
+async def upload_file(file: UploadFile = File(...), kind: str = "doc", user=Depends(get_current_user)):
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin").lower()
+    if ext not in MIME:
+        raise HTTPException(400, f"Type non supporté: {ext}")
+    file_id = uuid.uuid4().hex
+    path = f"{APP_NAME}/{user['user_id']}/{file_id}.{ext}"
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Fichier trop volumineux (max 8 Mo)")
+    result = put_object(path, data, MIME[ext])
+    doc = {
+        "file_id": file_id,
+        "user_id": user["user_id"],
+        "storage_path": result["path"],
+        "filename": file.filename,
+        "content_type": MIME[ext],
+        "size": result.get("size", len(data)),
+        "kind": kind,
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.files.insert_one(doc)
+    doc.pop("_id", None)
+    # Build a download URL the frontend can use
+    backend_origin = os.environ.get("BACKEND_PUBLIC_URL", "")
+    doc["url"] = f"/api/files/{file_id}"
+    return doc
+
+@api.get("/files/{file_id}")
+async def download_file(file_id: str, auth: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    rec = await db.files.find_one({"file_id": file_id, "is_deleted": False}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Fichier introuvable")
+    data, ct = get_object(rec["storage_path"])
+    return FResponse(content=data, media_type=rec.get("content_type", ct))
+
+# ============ STUDENT DOCUMENTS ============
+@api.post("/me/documents")
+async def add_doc(body: dict, user=Depends(get_current_user)):
+    """Register a document (file_id from /upload) under student's profile."""
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    doc_id = f"d_{uuid.uuid4().hex[:10]}"
+    entry = {
+        "doc_id": doc_id,
+        "user_id": user["user_id"],
+        "file_id": body.get("file_id"),
+        "filename": body.get("filename", "document"),
+        "doc_type": body.get("doc_type", "cv"),  # cv, lettre, convention, portfolio, autre
+        "visibility": body.get("visibility", "after_application"),  # private, connected, after_application, public
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.student_documents.insert_one(entry)
+    entry.pop("_id", None)
+    return entry
+
+@api.get("/users/{user_id}/documents")
+async def list_user_documents(user_id: str, requester=Depends(get_optional_user)):
+    docs = await db.student_documents.find({"user_id": user_id}, {"_id": 0}).to_list(50)
+    if requester and requester["user_id"] == user_id:
+        return docs  # owner sees all
+    # Determine accessible docs
+    out = []
+    has_contact = False
+    has_app = False
+    if requester:
+        ct = await db.contacts.find_one({"$or": [
+            {"user_a": user_id, "user_b": requester["user_id"]},
+            {"user_a": requester["user_id"], "user_b": user_id},
+        ]})
+        has_contact = bool(ct)
+        ap = await db.applications.find_one({"candidate_id": user_id, "company_id": requester["user_id"]})
+        has_app = bool(ap)
+    for d in docs:
+        v = d.get("visibility", "after_application")
+        ok = v == "public" or (v == "connected" and has_contact) or (v == "after_application" and has_app)
+        if ok:
+            out.append(d)
+    return out
+
+@api.delete("/me/documents/{doc_id}")
+async def delete_doc(doc_id: str, user=Depends(get_current_user)):
+    await db.student_documents.delete_one({"doc_id": doc_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+# ============ COMPANY GALLERY ============
+@api.post("/me/gallery")
+async def add_photo(body: dict, user=Depends(get_current_user)):
+    if user["role"] != "company":
+        raise HTTPException(403, "Entreprises uniquement")
+    pid = f"p_{uuid.uuid4().hex[:10]}"
+    entry = {
+        "photo_id": pid,
+        "user_id": user["user_id"],
+        "file_id": body.get("file_id"),
+        "url": body.get("url"),  # accepts direct URL too
+        "title": body.get("title", "Photo"),
+        "is_hidden": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.company_photos.insert_one(entry)
+    entry.pop("_id", None)
+    return entry
+
+@api.get("/users/{user_id}/gallery")
+async def get_gallery(user_id: str):
+    photos = await db.company_photos.find({"user_id": user_id, "is_hidden": {"$ne": True}}, {"_id": 0}).to_list(100)
+    return photos
+
+@api.delete("/me/gallery/{photo_id}")
+async def remove_photo(photo_id: str, user=Depends(get_current_user)):
+    await db.company_photos.delete_one({"photo_id": photo_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+# ============ EXTENDED OFFERS: source filter ============
+@api.get("/offer-sources")
+async def list_sources():
+    return {
+        "sources": [
+            {"id": "StageConnect", "label": "StageConnect", "internal": True},
+            {"id": "HelloWork", "label": "HelloWork", "internal": False},
+            {"id": "LinkedIn", "label": "LinkedIn", "internal": False},
+            {"id": "Indeed", "label": "Indeed", "internal": False},
+            {"id": "WelcomeToTheJungle", "label": "Welcome to the Jungle", "internal": False},
+            {"id": "FranceTravail", "label": "France Travail", "internal": False},
+            {"id": "JobTeaser", "label": "JobTeaser", "internal": False},
+            {"id": "StudentJob", "label": "StudentJob", "internal": False},
+            {"id": "LEtudiant", "label": "L'Étudiant", "internal": False},
+            {"id": "Apec", "label": "Apec", "internal": False},
+            {"id": "Meteojob", "label": "Meteojob", "internal": False},
+            {"id": "Monster", "label": "Monster", "internal": False},
+            {"id": "TalentCom", "label": "Talent.com", "internal": False},
+        ]
+    }
+
+# ============ SAVED OFFERS ============
+@api.post("/saved-offers/{offer_id}")
+async def save_offer(offer_id: str, user=Depends(get_current_user)):
+    existing = await db.saved_offers.find_one({"user_id": user["user_id"], "offer_id": offer_id})
+    if existing:
+        await db.saved_offers.delete_one({"user_id": user["user_id"], "offer_id": offer_id})
+        return {"saved": False}
+    await db.saved_offers.insert_one({
+        "saved_id": f"s_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"], "offer_id": offer_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"saved": True}
+
+@api.get("/saved-offers")
+async def my_saved_offers(user=Depends(get_current_user)):
+    saved = await db.saved_offers.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(200)
+    ids = [s["offer_id"] for s in saved]
+    offers = await db.offers.find({"offer_id": {"$in": ids}}, {"_id": 0}).to_list(200)
+    return offers
+
+# ============ APPLICATIONS DETAIL + EXTENSIONS ============
+@api.get("/applications/{app_id}")
+async def get_application(app_id: str, user=Depends(get_current_user)):
+    a = await db.applications.find_one({"app_id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Introuvable")
+    if user["user_id"] not in (a["candidate_id"], a["company_id"]) and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    if user["role"] == "company" and a["company_id"] == user["user_id"] and not a.get("viewed_at"):
+        await db.applications.update_one({"app_id": app_id}, {"$set": {"viewed_at": datetime.now(timezone.utc).isoformat(), "status": "vue" if a["status"] == "envoyee" else a["status"]}})
+        a["viewed_at"] = datetime.now(timezone.utc).isoformat()
+    candidate = await db.users.find_one({"user_id": a["candidate_id"]}, {"_id": 0, "password": 0})
+    offer = await db.offers.find_one({"offer_id": a["offer_id"]}, {"_id": 0})
+    documents = []
+    if user["role"] == "company" and a["company_id"] == user["user_id"]:
+        documents = await db.student_documents.find({"user_id": a["candidate_id"]}, {"_id": 0}).to_list(20)
+    return {"application": a, "candidate": candidate, "offer": offer, "documents": documents}
+
+@api.delete("/applications/{app_id}")
+async def withdraw_application(app_id: str, user=Depends(get_current_user)):
+    a = await db.applications.find_one({"app_id": app_id})
+    if not a or a["candidate_id"] != user["user_id"]:
+        raise HTTPException(403, "Interdit")
+    await db.applications.update_one({"app_id": app_id}, {"$set": {"status": "retiree"}})
+    return {"ok": True}
+
+@api.post("/applications/{app_id}/note")
+async def application_note(app_id: str, body: dict, user=Depends(get_current_user)):
+    a = await db.applications.find_one({"app_id": app_id})
+    if not a or a["company_id"] != user["user_id"]:
+        raise HTTPException(403, "Interdit")
+    await db.applications.update_one({"app_id": app_id}, {"$set": {"company_note": body.get("note", "")}})
+    return {"ok": True}
+
+# Override applications status update to support new statuses
+@api.patch("/applications/{app_id}/status")
+async def set_application_status(app_id: str, body: dict, user=Depends(get_current_user)):
+    a = await db.applications.find_one({"app_id": app_id})
+    if not a:
+        raise HTTPException(404, "Introuvable")
+    if a["company_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    status = body.get("status")
+    allowed = {"vue", "en_analyse", "entretien_propose", "acceptee", "refusee", "archivee"}
+    if status not in allowed:
+        raise HTTPException(400, "Statut invalide")
+    await db.applications.update_one({"app_id": app_id}, {"$set": {"status": status}})
+    await notify(a["candidate_id"], "application_status", f"Votre candidature \"{a['offer_title']}\" est maintenant: {status}", "/dashboard")
+    return {"ok": True}
+
+# ============ SEARCH STUDENTS (by companies) ============
+@api.get("/search/students")
+async def search_students(
+    q: Optional[str] = None,
+    level: Optional[str] = None,
+    domain: Optional[str] = None,
+    city: Optional[str] = None,
+    region: Optional[str] = None,
+    contract_type: Optional[str] = None,
+    student_status: Optional[str] = None,
+    skill: Optional[str] = None,
+    limit: int = 50,
+    user=Depends(get_current_user),
+):
+    if user["role"] not in ("company", "admin"):
+        raise HTTPException(403, "Réservé aux entreprises")
+    query = {"role": "candidate"}
+    if q:
+        query["$or"] = [{"name": {"$regex": q, "$options": "i"}}]
+    if level: query["profile.level"] = level
+    if domain: query["profile.domain"] = {"$regex": domain, "$options": "i"}
+    if city: query["profile.city"] = {"$regex": city, "$options": "i"}
+    if region: query["profile.region"] = region
+    if contract_type: query["profile.contract_type"] = contract_type
+    if student_status: query["profile.status"] = student_status
+    if skill: query["profile.skills"] = {"$regex": skill, "$options": "i"}
+    users = await db.users.find(query, {"_id": 0, "password": 0}).limit(limit).to_list(limit)
+    return users
+
+# ============ CONTACT EXTENSIONS: cancel sent, block ============
+@api.delete("/contacts/request/{request_id}")
+async def cancel_contact_request(request_id: str, user=Depends(get_current_user)):
+    r = await db.contact_requests.find_one({"request_id": request_id})
+    if not r or r["from_id"] != user["user_id"]:
+        raise HTTPException(403, "Interdit")
+    await db.contact_requests.delete_one({"request_id": request_id})
+    return {"ok": True}
+
+@api.delete("/contacts/{contact_user_id}")
+async def remove_contact(contact_user_id: str, user=Depends(get_current_user)):
+    await db.contacts.delete_many({"$or": [
+        {"user_a": user["user_id"], "user_b": contact_user_id},
+        {"user_a": contact_user_id, "user_b": user["user_id"]},
+    ]})
+    return {"ok": True}
+
+@api.post("/contacts/block/{target_id}")
+async def block_user(target_id: str, user=Depends(get_current_user)):
+    await db.blocked_users.insert_one({
+        "block_id": f"b_{uuid.uuid4().hex[:10]}",
+        "blocker_id": user["user_id"], "blocked_id": target_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await db.contacts.delete_many({"$or": [
+        {"user_a": user["user_id"], "user_b": target_id},
+        {"user_a": target_id, "user_b": user["user_id"]},
+    ]})
+    return {"ok": True}
+
+# Contact status helper for frontend
+@api.get("/contacts/status/{other_id}")
+async def contact_status(other_id: str, user=Depends(get_current_user)):
+    if other_id == user["user_id"]:
+        return {"status": "self"}
+    c = await db.contacts.find_one({"$or": [
+        {"user_a": user["user_id"], "user_b": other_id},
+        {"user_a": other_id, "user_b": user["user_id"]},
+    ]})
+    if c:
+        return {"status": "connected"}
+    sent = await db.contact_requests.find_one({"from_id": user["user_id"], "to_id": other_id, "status": "pending"}, {"_id": 0})
+    if sent:
+        return {"status": "sent", "request_id": sent["request_id"]}
+    received = await db.contact_requests.find_one({"from_id": other_id, "to_id": user["user_id"], "status": "pending"}, {"_id": 0})
+    if received:
+        return {"status": "received", "request_id": received["request_id"]}
+    return {"status": "none"}
+
+# ============ MASSIVE SEED v3 ============
+@api.post("/seed-v3")
+async def seed_v3(force: bool = False):
+    if not force and await db.offers.count_documents({}) > 50:
+        return {"ok": True, "msg": "Déjà peuplé"}
+    # Clean only offers (keep users, deals, etc. from earlier seeds intact)
+    await db.offers.delete_many({})
+    await db.users.delete_many({"role": "company", "user_id": {"$regex": "^user_cobig"}})
+
+    SOURCES = ["StageConnect", "HelloWork", "LinkedIn", "Indeed", "WelcomeToTheJungle", "FranceTravail",
+               "JobTeaser", "StudentJob", "LEtudiant", "Apec", "Meteojob", "Monster", "TalentCom"]
+    SOURCE_URLS = {
+        "HelloWork": "https://www.hellowork.com",
+        "LinkedIn": "https://www.linkedin.com/jobs",
+        "Indeed": "https://fr.indeed.com",
+        "WelcomeToTheJungle": "https://www.welcometothejungle.com",
+        "FranceTravail": "https://candidat.francetravail.fr",
+        "JobTeaser": "https://www.jobteaser.com",
+        "StudentJob": "https://www.studentjob.fr",
+        "LEtudiant": "https://www.letudiant.fr/jobsstages.html",
+        "Apec": "https://www.apec.fr",
+        "Meteojob": "https://www.meteojob.com",
+        "Monster": "https://www.monster.fr",
+        "TalentCom": "https://fr.talent.com",
+    }
+    REGIONS = [
+        ("Île-de-France", ["Paris", "Versailles", "Nanterre", "Saint-Denis", "Boulogne-Billancourt"]),
+        ("Auvergne-Rhône-Alpes", ["Lyon", "Grenoble", "Saint-Étienne", "Clermont-Ferrand", "Annecy"]),
+        ("Nouvelle-Aquitaine", ["Bordeaux", "Poitiers", "Limoges", "La Rochelle", "Pau"]),
+        ("Occitanie", ["Toulouse", "Montpellier", "Nîmes", "Perpignan"]),
+        ("Hauts-de-France", ["Lille", "Amiens", "Roubaix", "Tourcoing"]),
+        ("Provence-Alpes-Côte d'Azur", ["Marseille", "Nice", "Aix-en-Provence", "Toulon", "Cannes"]),
+        ("Grand Est", ["Strasbourg", "Reims", "Metz", "Nancy"]),
+        ("Pays de la Loire", ["Nantes", "Angers", "Le Mans"]),
+        ("Bretagne", ["Rennes", "Brest", "Quimper", "Lorient"]),
+        ("Normandie", ["Rouen", "Caen", "Le Havre"]),
+        ("Bourgogne-Franche-Comté", ["Dijon", "Besançon", "Belfort"]),
+        ("Centre-Val de Loire", ["Tours", "Orléans", "Bourges"]),
+        ("Corse", ["Ajaccio", "Bastia"]),
+    ]
+    SECTORS = ["Informatique", "Cybersécurité", "Développement web", "Industrie", "Nucléaire", "Mécanique",
+               "Électricité", "Maintenance", "Commerce", "Vente", "Logistique", "Transport", "Restauration",
+               "Hôtellerie", "Bâtiment", "Marketing", "Communication", "Comptabilité", "RH", "Santé",
+               "Social", "Environnement", "Énergie"]
+    PREFIXES = ["Nova", "Alpha", "Beta", "Tech", "Smart", "Bright", "Prime", "Atlas", "Quantum", "Pixel",
+                "Cyber", "Green", "Pulse", "Core", "Edge", "Vector", "Solar", "Eco", "Lumen", "Spark"]
+    SUFFIXES = ["Lab", "Group", "Tech", "Industries", "Conseil", "Solutions", "Systems", "Studio", "Works", "Network"]
+    LOGOS = [
+        "https://images.unsplash.com/photo-1770012977129-19f856a1f935?w=200",
+        "https://images.unsplash.com/photo-1761044591996-7a05341a3e12?w=200",
+        "https://images.unsplash.com/photo-1770210217380-d78a69acdc77?w=200",
+    ]
+    BANNERS = [
+        "https://images.unsplash.com/photo-1758691736975-9f7f643d178e?w=1200",
+        "https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200",
+        "https://images.unsplash.com/photo-1497366754035-f200968a6e72?w=1200",
+    ]
+    JOB_TEMPLATES = [
+        ("Développeur Full-Stack", "Informatique", ["JavaScript", "React", "Node.js"]),
+        ("Développeur Frontend", "Développement web", ["React", "TypeScript", "CSS"]),
+        ("Développeur Backend", "Informatique", ["Python", "FastAPI", "SQL"]),
+        ("Analyste Cybersécurité", "Cybersécurité", ["Pentest", "Linux", "SIEM"]),
+        ("Data Analyst", "Informatique", ["SQL", "Python", "Excel"]),
+        ("Ingénieur DevOps", "Informatique", ["Docker", "Kubernetes", "AWS"]),
+        ("Technicien de maintenance", "Maintenance", ["Mécanique", "Hydraulique", "Diagnostic"]),
+        ("Ingénieur Mécanique", "Mécanique", ["CAO", "SolidWorks", "Calcul"]),
+        ("Technicien Électricité", "Électricité", ["Habilitation", "Câblage", "Schémas"]),
+        ("Chargé de communication", "Communication", ["Réseaux sociaux", "Rédaction", "Photoshop"]),
+        ("Chargé de marketing digital", "Marketing", ["SEO", "Google Ads", "Analytics"]),
+        ("Assistant Comptable", "Comptabilité", ["Sage", "Excel", "Saisie"]),
+        ("Chargé de recrutement", "RH", ["Sourcing", "Entretiens", "LinkedIn"]),
+        ("Commercial B2B", "Commerce", ["Prospection", "Négociation", "CRM"]),
+        ("Conseiller de vente", "Vente", ["Relation client", "Conseil", "Encaissement"]),
+        ("Cariste / Préparateur de commandes", "Logistique", ["CACES", "Rigueur", "Inventaire"]),
+        ("Chauffeur livreur", "Transport", ["Permis B", "Itinéraires"]),
+        ("Serveur / Serveuse", "Restauration", ["Service", "Tenue", "Sourire"]),
+        ("Réceptionniste hôtellerie", "Hôtellerie", ["Anglais", "Accueil", "Réservations"]),
+        ("Aide-soignant", "Santé", ["Empathie", "Soins", "Hygiène"]),
+        ("Éducateur spécialisé", "Social", ["Écoute", "Animations", "Accompagnement"]),
+        ("Technicien environnement", "Environnement", ["Mesures", "Reporting", "Normes ISO"]),
+        ("Ingénieur Énergies renouvelables", "Énergie", ["Photovoltaïque", "Éolien", "ENR"]),
+        ("Conducteur de travaux", "Bâtiment", ["Planning", "Sécurité", "Lecture de plans"]),
+        ("Designer UX/UI", "Développement web", ["Figma", "Wireframe", "Prototype"]),
+        ("Product Owner Junior", "Informatique", ["Agile", "Scrum", "User stories"]),
+    ]
+
+    import random
+    random.seed(42)
+
+    company_docs = []
+    for i in range(110):
+        region, cities = random.choice(REGIONS)
+        city = random.choice(cities)
+        sector = random.choice(SECTORS)
+        name = f"{random.choice(PREFIXES)}{random.choice(SUFFIXES)}{i:03d}"
+        cid = f"user_cobig{i:04d}"
+        doc = {
+            "user_id": cid,
+            "email": f"hr@{name.lower()}.fr",
+            "password": hash_password("Demo1234!"),
+            "name": name,
+            "role": "company",
+            "profile": {
+                "company_name": name,
+                "logo": LOGOS[i % len(LOGOS)],
+                "banner": BANNERS[i % len(BANNERS)],
+                "sector": sector,
+                "size": random.choice(["1-10", "11-50", "51-200", "201-500", "500+"]),
+                "city": city, "region": region,
+                "address": f"{random.randint(1, 200)} rue {random.choice(['de la République', 'Voltaire', 'Pasteur', 'Hugo'])}",
+                "siret": f"{random.randint(100000000, 999999999)}00012",
+                "website": f"https://{name.lower()}.fr",
+                "description": f"{name} est une entreprise leader dans le secteur {sector.lower()}, basée à {city}. Nous recrutons régulièrement stagiaires et alternants.",
+                "phone": f"01 {random.randint(10, 99)} {random.randint(10, 99)} {random.randint(10, 99)} {random.randint(10, 99)}",
+                "pro_email": f"hr@{name.lower()}.fr",
+                "recruiting_domains": [sector],
+                "verified": i % 3 != 0,
+                "company_status": random.choice(["recrute_stagiaire", "recrute_alternant", "recrute_les_deux", "pas_de_recrutement"]),
+            },
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        company_docs.append(doc)
+    await db.users.insert_many(company_docs)
+
+    # Generate 320 offers (mix internal + external)
+    offers = []
+    for i in range(320):
+        template = random.choice(JOB_TEMPLATES)
+        title, dom, skills = template
+        co = random.choice(company_docs)
+        region = co["profile"]["region"]
+        city = co["profile"]["city"]
+        # Sometimes switch city to a random one in same region for variety
+        if random.random() < 0.4:
+            for r, cities in REGIONS:
+                if r == region:
+                    city = random.choice(cities)
+                    break
+        source = random.choice(SOURCES)
+        ct = random.choice(["stage", "alternance"])
+        is_internal = source == "StageConnect"
+        offer = {
+            "offer_id": f"off_big_{i:04d}",
+            "company_id": co["user_id"] if is_internal else None,
+            "company_name": co["profile"]["company_name"],
+            "company_logo": co["profile"]["logo"],
+            "verified": co["profile"]["verified"],
+            "source": source,
+            "external_url": SOURCE_URLS.get(source, "") + f"/offre-{i}" if not is_internal else None,
+            "title": title,
+            "contract_type": ct,
+            "domain": dom,
+            "city": city,
+            "region": region,
+            "remote": random.random() < 0.3,
+            "duration": "6 mois" if ct == "stage" else random.choice(["1 an", "2 ans"]),
+            "rhythm": "3j entreprise / 2j école" if ct == "alternance" else None,
+            "start_date": random.choice(["Septembre 2026", "Janvier 2026", "Mars 2026", "Dès que possible"]),
+            "level": random.choice(["Bac+2", "Bac+3", "Bac+5"]),
+            "skills": skills,
+            "description": f"Nous recherchons un(e) {title} motivé(e) pour rejoindre notre équipe à {city}. Vous travaillerez sur des projets stimulants dans le secteur {dom.lower()}.",
+            "profile": "Étudiant(e) en formation pertinente, motivé(e), avec une appétence pour le domaine.",
+            "benefits": random.choice(["Tickets restaurant, télétravail partiel, mutuelle", "Prime de fin d'année, RTT, formation continue", "Environnement startup, locaux modernes, équipe jeune"]),
+            "salary": "Gratification 600€" if ct == "stage" else f"{random.choice(['800', '1000', '1200', '1400'])}€ / mois",
+            "views": random.randint(0, 500),
+            "status": random.choice(["active", "active", "active", "expiree"]),
+            "created_at": (datetime.now(timezone.utc) - timedelta(days=random.randint(0, 60))).isoformat(),
+        }
+        offers.append(offer)
+    await db.offers.insert_many(offers)
+    return {"ok": True, "companies_added": len(company_docs), "offers_added": len(offers)}
+
+
+
 app.include_router(api)
 
 app.add_middleware(
@@ -1322,6 +1819,19 @@ async def startup():
             logger.info("Database seeded")
         except Exception as e:
             logger.error(f"Seed failed: {e}")
+    # Auto-seed-v3 massive (offers) once
+    if await db.offers.count_documents({}) < 50:
+        try:
+            await seed_v3(force=True)
+            logger.info("Database v3 seeded (100+ companies, 300+ offers)")
+        except Exception as e:
+            logger.error(f"Seed-v3 failed: {e}")
+    # Init storage
+    try:
+        init_storage()
+        logger.info("Storage initialized")
+    except Exception as e:
+        logger.warning(f"Storage init deferred: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():

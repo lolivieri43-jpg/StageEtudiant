@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 3 (multi-source offers, France map, massive seed, search students, photo gallery, multi-documents, application detail v3, saved offers, contact lifecycle, Emergent object-storage file upload) — backend 100% (25/25 new + 41 regression = 66/66), frontend critical flows verified (offers list with red source badges + source dropdown + mobile toggle, candidate Offres sauvegardées menu + page, company Rechercher des étudiants menu + page returning 25 student cards, external offer links open in new tab). Two backend 500s found and fixed in-place (POST /me/documents and POST /me/gallery returned the mutated insert dict with raw ObjectId — added entry.pop('_id', None)). One minor API gap surfaced (see backend_issues).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/offers", "issue": "Does NOT support `source` query parameter — frontend has to filter client-side. Also default limit=50 means the page only ever loads 50 of the 320 seeded offers. Recommend adding `source` filter and bumping default limit (e.g. 200) or passing limit from the frontend."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Offers list", "issue": "Page shows '100 offres' even though seed has 320 — because GET /api/offers default limit=50 and the page loads with limit=100 only via filters. Users never see most external offers.", "affected_selectors": ["/offers list count text"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_deals_payments.py",
+    "/app/test_reports/pytest/pytest_iter3.xml",
+    "/app/test_reports/pytest/pytest_full.xml"
+  ],
+  "action_items": [
+    "Add `source` query param to GET /api/offers (server.py:335) and increase default limit (or have OffersPage.jsx request limit=500) so the 320-offer seed is actually browsable from the UI.",
+    "(Already fixed by testing agent) Pop '_id' before returning entry in POST /me/documents and POST /me/gallery — main agent should keep this pattern for any future insert-then-return endpoints."
+  ],
+  "critical_code_review_comments": [
+    "server.py now 1837 lines — split into routers (offers, applications, contacts, storage, search) is overdue.",
+    "Storage helpers (init_storage / put_object / get_object) make synchronous `requests` calls inside async FastAPI endpoints — blocks the event loop on every upload/download; switch to httpx.AsyncClient or run_in_executor.",
+    "GET /api/files/{file_id} accepts auth=Query and authorization=Header but never validates them — any unauthenticated user with a file_id can download any uploaded document. This is a privacy issue for documents flagged 'private'/'connected'/'after_application' (the visibility check exists only on /users/{id}/documents listing, not on the file content endpoint).",
+    "POST /api/me/documents stores file_id but does not verify the file actually belongs to the calling user — a candidate can register another user's file_id under their own doc list.",
+    "POST /api/contacts/block/{target_id} has no idempotency guard — same blocker/blocked pair can be inserted N times.",
+    "GET /api/search/students returns user docs without filtering blocked_users; blocked candidates should be hidden.",
+    "POST /api/applications/{app_id}/status uses untyped body: dict — switch to a Pydantic model with Literal of allowed statuses.",
+    "GET /api/offers ignores `source` (and any param not in the whitelist) silently — should either accept it or 400 on unknown params.",
+    "Default offers limit=50 is too low for a multi-source aggregator; consider 200 with a hard cap."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (added entry.pop('_id', None) after insert_one in POST /me/documents and POST /me/gallery)",
+    "/app/backend/tests/test_iter3.py (new comprehensive iter3 regression suite)"
+  ],
+  "success_rate": {"backend": "100% (66/66 tests, 25 new for iter3)", "frontend": "100% on critical flows verified (offers list + badges + mobile toggle + source filter, saved-offers, search/students with 25 cards, role-aware avatar menu, external _blank links)"},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234!, lucas.martin@email.fr/Demo1234! (loaded from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test creates fresh candidate (app3_xxx@email.fr) + fresh internal offer per app-flow test; creates fresh A/B users for contact lifecycle. All marked TEST_ where applicable. No teardown executed (DB cleanup left to main agent / seed re-run).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter3 regression suite at /app/backend/tests/test_iter3.py covers /offer-sources, /offers (source presence), /saved-offers, /upload+/files, /me/documents+visibility, /me/gallery, /search/students RBAC+filters, /applications/{id} GET+DELETE+/status+/note (with new statuses vue/en_analyse/entretien_propose/acceptee/refusee/archivee), /contacts/status full lifecycle (none→sent→canceled→sent→connected→removed→blocked). Run with: REACT_APP_BACKEND_URL=https://joblink-stages.preview.emergentagent.com pytest /app/backend/tests/ — 66 pass in ~70s. Two fixes applied in server.py (ObjectId pop in /me/documents and /me/gallery). Outstanding: GET /api/offers source filter + default limit (see action_items).",
+  "rca of the issue": "POST /me/documents and POST /me/gallery were returning the dict that motor's insert_one had just mutated to include a BSON ObjectId. FastAPI's jsonable_encoder choked on ObjectId → HTTP 500. Fix: entry.pop('_id', None) before return. Verified by re-running the failing tests, both now pass. /api/upload was already doing this correctly."
+}
