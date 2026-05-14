@@ -13,18 +13,29 @@ export default function SearchStudentsPage() {
   const [filters, setFilters] = useState({
     q: "", level: "", domain: "", city: "", contract_type: "", student_status: "", skill: "",
   });
+  const [nearCity, setNearCity] = useState("");
+  const [distanceKm, setDistanceKm] = useState("50");
+  const [cityList, setCityList] = useState([]);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => { api.get("/cities").then((r) => setCityList(r.data.cities)); }, []);
+
   const load = async () => {
     setLoading(true);
-    const params = new URLSearchParams();
-    Object.entries(filters).forEach(([k, v]) => v && params.set(k, v));
-    const { data } = await api.get(`/search/students?${params.toString()}`);
-    setStudents(data);
+    if (nearCity) {
+      const p = new URLSearchParams({ city: nearCity, distance_km: distanceKm });
+      const { data } = await api.get(`/search/students-nearby?${p.toString()}`);
+      setStudents(data);
+    } else {
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([k, v]) => v && params.set(k, v));
+      const { data } = await api.get(`/search/students?${params.toString()}`);
+      setStudents(data);
+    }
     setLoading(false);
   };
-  useEffect(() => { load(); }, [filters]);
+  useEffect(() => { load(); }, [filters, nearCity, distanceKm]);
 
   const sendContact = async (uid) => {
     try {
@@ -63,6 +74,18 @@ export default function SearchStudentsPage() {
               <option value="deja_trouve">Déjà trouvé</option>
               <option value="non_disponible">Non disponible</option>
             </select>
+          </div>
+          <div className="mt-3 grid sm:grid-cols-2 gap-3 bg-gradient-to-r from-blue-50 to-violet-50 rounded-xl p-3">
+            <select value={nearCity} onChange={(e) => setNearCity(e.target.value)} className="rounded-xl border-0 bg-white h-10 px-3" data-testid="filter-near-city">
+              <option value="">Rayon autour d'une ville (optionnel)</option>
+              {cityList.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {nearCity && (
+              <div className="flex items-center gap-2 bg-white rounded-xl px-3 h-10">
+                <span className="text-xs font-semibold text-slate-600 w-16">{distanceKm} km</span>
+                <input type="range" min="10" max="300" step="10" value={distanceKm} onChange={(e) => setDistanceKm(e.target.value)} className="flex-1 accent-violet-600" data-testid="filter-distance" />
+              </div>
+            )}
           </div>
         </div>
 

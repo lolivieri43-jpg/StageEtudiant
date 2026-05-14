@@ -32,13 +32,27 @@ export default function OffersPage() {
   const level = params.get("level") || "";
   const remote = params.get("remote") === "true";
   const source = params.get("source") || "";
+  const nearCity = params.get("near_city") || "";
+  const distanceKm = params.get("distance_km") || "50";
+  const [cityList, setCityList] = useState([]);
 
   useEffect(() => {
     api.get("/offers/regions").then((r) => setStats(r.data)).catch(() => {});
+    api.get("/cities").then((r) => setCityList(r.data.cities)).catch(() => {});
   }, []);
 
   useEffect(() => {
     setLoading(true);
+    if (nearCity) {
+      const p = new URLSearchParams();
+      p.set("city", nearCity);
+      p.set("distance_km", distanceKm);
+      if (ct) p.set("contract_type", ct);
+      if (source) p.set("source", source);
+      p.set("limit", "200");
+      api.get(`/offers-nearby?${p.toString()}`).then((r) => setOffers(r.data)).finally(() => setLoading(false));
+      return;
+    }
     const p = new URLSearchParams();
     if (q) p.set("q", q);
     if (region) p.set("region", region);
@@ -50,7 +64,7 @@ export default function OffersPage() {
     if (source) p.set("source", source);
     p.set("limit", "300");
     api.get(`/offers?${p.toString()}`).then((r) => setOffers(r.data)).finally(() => setLoading(false));
-  }, [q, region, city, ct, domain, level, remote, source]);
+  }, [q, region, city, ct, domain, level, remote, source, nearCity, distanceKm]);
 
   const updateParam = (k, v) => {
     const p = new URLSearchParams(params);
@@ -103,6 +117,19 @@ export default function OffersPage() {
             <option value="">Toutes</option>
             {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-violet-50 rounded-xl p-4 -mx-2">
+          <label className="text-xs font-bold uppercase tracking-wider text-violet-700 mb-2 block">Rayon autour d'une ville</label>
+          <select value={nearCity} onChange={(e) => updateParam("near_city", e.target.value)} className="w-full rounded-xl border-0 bg-white px-3 h-10 text-sm" data-testid="filter-near-city">
+            <option value="">Aucun</option>
+            {cityList.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {nearCity && (
+            <div className="mt-2">
+              <label className="text-[10px] font-semibold text-slate-500">Distance: {distanceKm} km</label>
+              <input type="range" min="10" max="300" step="10" value={distanceKm} onChange={(e) => updateParam("distance_km", e.target.value)} className="w-full accent-violet-600" data-testid="filter-distance" />
+            </div>
+          )}
         </div>
         <label className="flex items-center gap-2 cursor-pointer" data-testid="filter-remote">
           <Checkbox checked={remote} onCheckedChange={(v) => updateParam("remote", v ? "true" : "")} />

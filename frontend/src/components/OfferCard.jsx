@@ -52,6 +52,11 @@ export default function OfferCard({ offer }) {
                 <Wifi className="w-3 h-3 mr-1" />Télétravail
               </Badge>
             )}
+            {offer.distance_km !== undefined && (
+              <Badge variant="secondary" className="rounded-full bg-amber-50 text-amber-700 border-0">
+                {offer.distance_km} km
+              </Badge>
+            )}
           </div>
         </div>
       </div>

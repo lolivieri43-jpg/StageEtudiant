@@ -25,6 +25,19 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 4 (2026-02) — Phase B : Distance, Temps réel WebSocket, Connecteurs externes
+- ✅ **Géocodage** : table statique de 50+ villes françaises → coordonnées GPS, formule de Haversine
+- ✅ **Recherche par rayon** : `/api/offers-nearby?city=Paris&distance_km=80` retourne les offres triées par distance, avec badge "km" sur chaque carte
+- ✅ **Recherche étudiants par rayon** : `/api/search/students-nearby` (réservé entreprises)
+- ✅ **Filtres frontend** : sélecteur ville + slider distance (10-300 km) sur /offers et /search/students
+- ✅ **WebSocket** `/api/ws?token=...` : ConnectionManager avec broadcast, présence online/offline, événements typing
+- ✅ **Messagerie temps réel** : nouveaux messages poussés instantanément (plus de polling 5s), indicateur "écrit..." avec timeout 3s, badge Live/Offline dans header
+- ✅ **Présence en ligne** : pastille verte synchronisée en temps réel sur chaque contact (broadcast aux contacts à la (dé)connexion)
+- ✅ **Endpoint /messages-rt** : nouveau POST qui push via WebSocket en plus d'insérer en DB (l'ancien /messages reste compatible)
+- ✅ **Framework connecteurs externes** : classe `ExternalConnector` extensible, implémentations stub `HelloWorkConnector` + `FranceTravailConnector` (status `simulation_only` tant que pas de contrat partenaire)
+- ✅ **Admin** : `/api/admin/refresh-external?source=HelloWork` pour fetch + persistance idempotente · `/api/admin/external-connectors` pour lister
+- ✅ Structure prête à recevoir de vraies API (il suffit d'implémenter `fetch()` avec une vraie URL)
+
 ## Iteration 3 (2026-02) — Multi-source + Massive seed + Profils enrichis + Apps détaillées
 - ✅ Seed massif : 110 entreprises fictives + 320 offres (mix interne StageConnect + 12 sources externes : HelloWork, LinkedIn, Indeed, Welcome to the Jungle, France Travail, JobTeaser, StudentJob, L'Étudiant, Apec, Meteojob, Monster, Talent.com)
 - ✅ Badges rouges visibles sur chaque offre indiquant l'origine

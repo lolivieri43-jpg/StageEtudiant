@@ -1,19 +1,22 @@
 """FastAPI backend for StagiaireConnect - French stage/alternance platform."""
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
+import math
+import json as _json
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Set
 import uuid
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
 import requests
-from collections import Counter
+from collections import Counter, defaultdict
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1843,6 +1846,296 @@ async def seed_v3(force: bool = False):
         offers.append(offer)
     await db.offers.insert_many(offers)
     return {"ok": True, "companies_added": len(company_docs), "offers_added": len(offers)}
+
+
+
+# ============ PHASE B: GEOCODING + DISTANCE SEARCH ============
+# Static mapping of major French cities → coordinates (lat, lng)
+CITY_COORDS = {
+    "paris": (48.8566, 2.3522), "marseille": (43.2965, 5.3698), "lyon": (45.7640, 4.8357),
+    "toulouse": (43.6047, 1.4442), "nice": (43.7102, 7.2620), "nantes": (47.2184, -1.5536),
+    "strasbourg": (48.5734, 7.7521), "montpellier": (43.6108, 3.8767), "bordeaux": (44.8378, -0.5792),
+    "lille": (50.6292, 3.0573), "rennes": (48.1173, -1.6778), "reims": (49.2583, 4.0317),
+    "saint-étienne": (45.4397, 4.3872), "toulon": (43.1242, 5.9280), "le havre": (49.4944, 0.1079),
+    "grenoble": (45.1885, 5.7245), "dijon": (47.3220, 5.0415), "angers": (47.4784, -0.5632),
+    "nîmes": (43.8367, 4.3601), "villeurbanne": (45.7720, 4.8902), "saint-denis": (48.9362, 2.3574),
+    "le mans": (48.0061, 0.1996), "aix-en-provence": (43.5297, 5.4474), "clermont-ferrand": (45.7772, 3.0870),
+    "brest": (48.3905, -4.4860), "tours": (47.3941, 0.6848), "amiens": (49.8941, 2.2958),
+    "limoges": (45.8336, 1.2611), "annecy": (45.8992, 6.1294), "perpignan": (42.6886, 2.8948),
+    "boulogne-billancourt": (48.8352, 2.2412), "besançon": (47.2378, 6.0241), "orléans": (47.9029, 1.9039),
+    "metz": (49.1193, 6.1757), "rouen": (49.4432, 1.0993), "mulhouse": (47.7508, 7.3359),
+    "caen": (49.1829, -0.3707), "nancy": (48.6921, 6.1844), "poitiers": (46.5802, 0.3404),
+    "versailles": (48.8049, 2.1204), "la rochelle": (46.1591, -1.1517), "pau": (43.2951, -0.3708),
+    "bourges": (47.0810, 2.3988), "ajaccio": (41.9192, 8.7386), "bastia": (42.7028, 9.4503),
+    "belfort": (47.6379, 6.8628), "quimper": (47.9960, -4.0978), "lorient": (47.7484, -3.3702),
+    "saint-denis (réunion)": (-20.8823, 55.4504), "cannes": (43.5528, 7.0174), "tourcoing": (50.7235, 3.1602),
+    "roubaix": (50.6927, 3.1746), "nanterre": (48.8924, 2.2069),
+}
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp/2)**2 + math.cos(p1) * math.cos(p2) * math.sin(dl/2)**2
+    return R * 2 * math.asin(math.sqrt(a))
+
+def get_coords(city: Optional[str]):
+    if not city:
+        return None
+    return CITY_COORDS.get(city.strip().lower())
+
+@api.get("/cities")
+async def list_cities():
+    """Return list of geocodable cities for frontend autocomplete."""
+    return {"cities": sorted([c.title() for c in CITY_COORDS.keys()])}
+
+@api.get("/offers-nearby")
+async def offers_nearby(city: str, distance_km: float = 50, limit: int = 200,
+                        contract_type: Optional[str] = None, source: Optional[str] = None):
+    coords = get_coords(city)
+    if not coords:
+        raise HTTPException(404, f"Ville inconnue: {city}. Utilisez /api/cities pour la liste.")
+    lat0, lon0 = coords
+    query = {}
+    if contract_type: query["contract_type"] = contract_type
+    if source: query["source"] = source
+    offers = await db.offers.find(query, {"_id": 0}).to_list(2000)
+    result = []
+    for o in offers:
+        oc = get_coords(o.get("city"))
+        if not oc:
+            continue
+        d = haversine(lat0, lon0, oc[0], oc[1])
+        if d <= distance_km:
+            o["distance_km"] = round(d, 1)
+            result.append(o)
+    result.sort(key=lambda x: x["distance_km"])
+    return result[:limit]
+
+@api.get("/search/students-nearby")
+async def students_nearby(city: str, distance_km: float = 50, limit: int = 100,
+                          user=Depends(get_current_user)):
+    if user["role"] not in ("company", "admin"):
+        raise HTTPException(403, "Réservé aux entreprises")
+    coords = get_coords(city)
+    if not coords:
+        raise HTTPException(404, f"Ville inconnue: {city}")
+    lat0, lon0 = coords
+    students = await db.users.find({"role": "candidate"}, {"_id": 0, "password": 0}).to_list(2000)
+    result = []
+    for s in students:
+        sc = get_coords(s.get("profile", {}).get("city"))
+        if not sc:
+            continue
+        d = haversine(lat0, lon0, sc[0], sc[1])
+        if d <= distance_km:
+            s["distance_km"] = round(d, 1)
+            result.append(s)
+    result.sort(key=lambda x: x["distance_km"])
+    return result[:limit]
+
+# ============ PHASE B: WEBSOCKET REAL-TIME MESSAGING ============
+class ConnectionManager:
+    def __init__(self):
+        self.active: Dict[str, Set[WebSocket]] = defaultdict(set)
+        self.online: Set[str] = set()
+
+    async def connect(self, user_id: str, ws: WebSocket):
+        await ws.accept()
+        self.active[user_id].add(ws)
+        self.online.add(user_id)
+        await self.broadcast_presence(user_id, True)
+
+    def disconnect(self, user_id: str, ws: WebSocket):
+        if ws in self.active[user_id]:
+            self.active[user_id].remove(ws)
+        if not self.active[user_id]:
+            self.online.discard(user_id)
+
+    async def send_to(self, user_id: str, payload: dict):
+        dead = []
+        for ws in list(self.active.get(user_id, [])):
+            try:
+                await ws.send_text(_json.dumps(payload))
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.active[user_id].discard(ws)
+
+    async def broadcast_presence(self, user_id: str, online: bool):
+        # Notify all this user's contacts about presence change
+        contacts = await db.contacts.find({"$or": [{"user_a": user_id}, {"user_b": user_id}]}, {"_id": 0}).to_list(500)
+        for c in contacts:
+            peer = c["user_b"] if c["user_a"] == user_id else c["user_a"]
+            await self.send_to(peer, {"type": "presence", "user_id": user_id, "online": online})
+
+manager = ConnectionManager()
+
+def verify_ws_token(token: str) -> Optional[str]:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        return payload.get("user_id")
+    except Exception:
+        return None
+
+@app.websocket("/api/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str):
+    user_id = verify_ws_token(token)
+    if not user_id:
+        # Try session token
+        sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+        if sess:
+            user_id = sess.get("user_id")
+    if not user_id:
+        await websocket.close(code=1008)
+        return
+    await manager.connect(user_id, websocket)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = _json.loads(raw)
+            except Exception:
+                continue
+            kind = data.get("type")
+            if kind == "typing":
+                to_id = data.get("to_user_id")
+                if to_id:
+                    await manager.send_to(to_id, {"type": "typing", "from_id": user_id, "is_typing": data.get("is_typing", True)})
+            elif kind == "ping":
+                await websocket.send_text(_json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        manager.disconnect(user_id, websocket)
+        await manager.broadcast_presence(user_id, False)
+    except Exception as e:
+        logger.warning(f"WS error: {e}")
+        manager.disconnect(user_id, websocket)
+        await manager.broadcast_presence(user_id, False)
+
+@api.get("/presence")
+async def presence(user=Depends(get_current_user)):
+    """Return list of online contact user_ids."""
+    contacts = await db.contacts.find({"$or": [{"user_a": user["user_id"]}, {"user_b": user["user_id"]}]}, {"_id": 0}).to_list(500)
+    peer_ids = [c["user_b"] if c["user_a"] == user["user_id"] else c["user_a"] for c in contacts]
+    online = [pid for pid in peer_ids if pid in manager.online]
+    return {"online": online}
+
+# Hook into send_message to push real-time notifications
+async def push_new_message_event(msg: dict):
+    payload = {"type": "message", "message": msg}
+    await manager.send_to(msg["to_id"], payload)
+    await manager.send_to(msg["from_id"], payload)
+
+# Wrap the existing /messages POST to push websocket events without breaking the API
+@api.post("/messages-rt")
+async def send_message_rt(data: MessageIn, user=Depends(get_current_user)):
+    other = await db.users.find_one({"user_id": data.to_user_id}, {"_id": 0})
+    if not other:
+        raise HTTPException(404, "Destinataire introuvable")
+    pair = sorted([user["user_id"], data.to_user_id])
+    conv_id = f"conv_{pair[0][-6:]}_{pair[1][-6:]}"
+    msg_id = f"msg_{uuid.uuid4().hex[:12]}"
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "message_id": msg_id, "conv_id": conv_id,
+        "from_id": user["user_id"], "from_name": user["name"],
+        "to_id": data.to_user_id, "to_name": other["name"],
+        "content": data.content, "attachment": data.attachment,
+        "read": False, "created_at": now,
+    }
+    await db.messages.insert_one(doc)
+    doc.pop("_id", None)
+    await db.conversations.update_one(
+        {"conv_id": conv_id},
+        {"$set": {"conv_id": conv_id, "participants": pair, "last_message": data.content, "last_at": now}},
+        upsert=True,
+    )
+    await notify(data.to_user_id, "message", f"Nouveau message de {user['name']}", "/messages", {"user_id": user["user_id"], "name": user["name"]})
+    await push_new_message_event(doc)
+    return doc
+
+# ============ PHASE B: EXTERNAL API CONNECTOR FRAMEWORK ============
+# Structure prête à recevoir de vraies API. Pour l'instant, génère des données
+# simulées avec une signature commune. Plus tard: brancher de vraies API.
+
+class ExternalConnector:
+    """Base class for external offer sources."""
+    name = "Unknown"
+    enabled = False
+    api_endpoint = None
+
+    async def fetch(self, query: str = "", location: str = "", limit: int = 20) -> List[dict]:
+        """Fetch external offers. Returns list of offer dicts in our canonical format."""
+        raise NotImplementedError
+
+    def _make_offer(self, idx, title, city, region, contract_type="stage"):
+        return {
+            "offer_id": f"ext_{self.name.lower()}_{idx}_{uuid.uuid4().hex[:6]}",
+            "company_id": None,
+            "company_name": f"Entreprise {self.name} #{idx}",
+            "company_logo": None,
+            "verified": False,
+            "source": self.name,
+            "external_url": f"{self.api_endpoint}/offre/{idx}" if self.api_endpoint else None,
+            "title": title, "contract_type": contract_type,
+            "domain": "Multi-domaine", "city": city, "region": region,
+            "remote": idx % 4 == 0, "duration": "6 mois" if contract_type == "stage" else "1 an",
+            "rhythm": None, "start_date": "À convenir",
+            "level": "Bac+3", "skills": ["Polyvalence", "Motivation"],
+            "description": f"Offre issue de {self.name}. Pour postuler, ouvrez le site source.",
+            "profile": "Étudiant motivé(e)", "benefits": "Selon entreprise",
+            "salary": "Selon profil", "views": 0,
+            "status": "active",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+class HelloWorkConnector(ExternalConnector):
+    name = "HelloWork"; api_endpoint = "https://www.hellowork.com"
+    async def fetch(self, query="", location="", limit=20):
+        # TODO: HelloWork doesn't expose a public API — partner contract required.
+        # Currently returns simulated batch. When real API available, swap this.
+        return [self._make_offer(i, f"Stage {query or 'Marketing'}", location or "Paris", "Île-de-France") for i in range(limit)]
+
+class FranceTravailConnector(ExternalConnector):
+    name = "FranceTravail"; api_endpoint = "https://candidat.francetravail.fr"
+    async def fetch(self, query="", location="", limit=20):
+        # France Travail expose une API officielle (sur demande) — structure prête.
+        return [self._make_offer(i, f"Alternance {query or 'Commerce'}", location or "Lyon", "Auvergne-Rhône-Alpes", "alternance") for i in range(limit)]
+
+CONNECTORS = {
+    "HelloWork": HelloWorkConnector(),
+    "FranceTravail": FranceTravailConnector(),
+}
+
+@api.post("/admin/refresh-external")
+async def refresh_external(source: str = "HelloWork", query: str = "", location: str = "Paris", limit: int = 20, user=Depends(get_current_user)):
+    """Admin endpoint to (re)fetch external offers and persist them."""
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin uniquement")
+    conn = CONNECTORS.get(source)
+    if not conn:
+        raise HTTPException(400, f"Source non supportée: {source}. Disponibles: {list(CONNECTORS.keys())}")
+    fetched = await conn.fetch(query=query, location=location, limit=limit)
+    # Idempotent insert: skip if offer_id exists
+    inserted = 0
+    for off in fetched:
+        existing = await db.offers.find_one({"offer_id": off["offer_id"]})
+        if not existing:
+            await db.offers.insert_one(off)
+            inserted += 1
+    return {"ok": True, "source": source, "fetched": len(fetched), "inserted": inserted}
+
+@api.get("/admin/external-connectors")
+async def list_connectors(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin uniquement")
+    return {
+        "connectors": [
+            {"name": c.name, "endpoint": c.api_endpoint, "enabled": c.enabled, "status": "simulation_only" if not c.enabled else "live"}
+            for c in CONNECTORS.values()
+        ]
+    }
 
 
 
