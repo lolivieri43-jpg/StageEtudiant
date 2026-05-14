@@ -2,7 +2,12 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/api";
 import OfferCard from "../components/OfferCard";
-import FranceMap from "../components/FranceMap";
+import FranceMap from "../components/FranceMap"; // kept import for backward compat; not rendered
+const REGIONS_LIST = [
+  "Île-de-France", "Auvergne-Rhône-Alpes", "Nouvelle-Aquitaine", "Occitanie", "Hauts-de-France",
+  "Provence-Alpes-Côte d'Azur", "Grand Est", "Pays de la Loire", "Bretagne", "Normandie",
+  "Bourgogne-Franche-Comté", "Centre-Val de Loire", "Corse",
+];
 import { Search, Filter, X, ChevronDown, ChevronUp, Map as MapIcon, List } from "lucide-react";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -146,8 +151,23 @@ export default function OffersPage() {
   );
 
   const Map = () => (
-    <div className="card-soft p-4 mb-6">
-      <FranceMap stats={stats} selected={region} onSelect={(r) => updateParam("region", r)} />
+    <div className="card-soft p-5 mb-6">
+      <h3 className="font-bold text-slate-900 mb-3">Filtrer par région</h3>
+      <div className="flex flex-wrap gap-2">
+        {REGIONS_LIST.map(r => (
+          <button
+            key={r}
+            onClick={() => updateParam("region", r === region ? "" : r)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${region === r ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+            data-testid={`region-chip-${r.replace(/\s|'|-/g, "_")}`}
+          >
+            {r}
+            {stats.by_region?.find(s => s.region === r) && (
+              <span className="ml-1.5 text-[10px] opacity-70">({stats.by_region.find(s => s.region === r).offers})</span>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 

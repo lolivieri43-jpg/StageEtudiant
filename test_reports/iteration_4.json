@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 5 testing — avatar/banner upload + Pillow compression, /profile-v2 cascade, /candidates/featured, /admin/grant-premium, /admin/refresh-external (FT simulation), /admin/external-connectors, Mongo indexes. Backend: 17/18 tests pass. 1 test fails by design — it documents a CRITICAL UI integration bug: GET /api/files/{file_id} returns 401 to anonymous requests for avatar/banner files, so <img src=/api/files/...> tags in the browser cannot display avatars or banners (browsers don't send Bearer tokens on <img> requests). Frontend: Landing page no longer shows interactive France SVG map (replaced by region grid with offer counts), Offers page same (region chips with counts). Premium badge visible on landing featured candidates. Authenticated-area UI checks (own-profile avatar/banner upload, admin 'Premium 30j' button) could not be visually verified — the login form inputs did not accept Playwright .fill() after 3 attempts (likely controlled React inputs requiring focus events); backend login via /api/auth/login was confirmed working for both admin and candidate so it's a script limitation, not a functional bug.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/files/{file_id}", "issue": "Avatar/banner files (kind='avatar'/'banner') fall through to the no-reference branch which requires owner authentication. Browsers can't send Bearer auth on <img> tags, so avatars/banners stored under /api/files/{id} will return 401 and never render in the UI. Fix: short-circuit when rec['kind'] in ('avatar','banner') and serve them publicly, OR move avatar/banner serving to a separate public endpoint (e.g. /api/public/avatars/{id}).", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Profile avatar display", "issue": "Even if upload succeeds and profile.avatar is set to /api/files/{id}, the URL returns 401 anonymously — every page that renders a candidate avatar (Landing featured, /offers cards, /profile/:id, post author avatars) will show a broken image once users start uploading.", "affected_selectors": ["img[src*='/api/files/']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter5.py",
+    "/app/test_reports/pytest/pytest_iter5.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Make /api/files/{file_id} serve avatar/banner files publicly (no auth) — currently any uploaded avatar/banner returns 401 to <img> tags. Suggested patch in server.py near line 1417: before the 'no-reference' owner check, add `if rec.get('kind') in ('avatar','banner'): data, ct = get_object(rec['storage_path']); return FResponse(content=data, media_type=rec.get('content_type', ct))`.",
+    "OPTIONAL: previous iter3 action item is still open — GET /api/offers does not accept a `source` query filter (frontend filters client-side). Iter5 didn't touch this."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 2443 lines — past time to split into routers (offers, applications, files/storage, admin, profile, iter5 features).",
+    "FranceTravailRealConnector uses synchronous `requests` inside async endpoints — same issue as flagged in iter3 for storage helpers. Switch to httpx.AsyncClient or run_in_executor; otherwise the FT real call (when creds are added) will block the event loop for up to 20s per request.",
+    "/api/me/avatar and /api/me/banner cascade avatar_url to posts/comments/applications/offers, but the cascade does NOT update the new `is_premium`/`profile.avatar` of the user document itself when the user later DELETEs the avatar — old cascaded `author_avatar` URLs remain pointing at deleted file_ids (file is_deleted is never flipped on DELETE /me/avatar either). Consider tombstoning the file row or clearing cascaded fields on delete.",
+    "DELETE /api/me/avatar and /api/me/banner do not delete the underlying file from object storage nor mark db.files.is_deleted=true — orphaned files accumulate.",
+    "/api/profile-v2 accepts an unvalidated `dict` body — switch to a Pydantic ProfileUpdate model with explicit fields, especially since it also mutates root `users.name`.",
+    "/api/profile-v2 sets profile fields via dict.update including non-whitelisted keys — a user could set arbitrary fields like profile.is_premium=true via the PUT. There's no field allow-list. CRITICAL security issue: a non-admin candidate can PUT {is_premium: true, premium_status: 'active'} and grant themselves premium without /admin/grant-premium.",
+    "/api/candidates/featured: the expired-premium filter has a bug — entries WITHOUT premium_end_date fall through to `valid_premium.append(p)` outside the if/try, so technically expired-but-no-end-date users still appear; and entries WITH end_date and a parse failure also fall through. Confusing control flow; rewrite explicitly.",
+    "compress_image: opens BytesIO then thumbnails in-place; for huge inputs (10 MB max) this is OK, but no Image.MAX_IMAGE_PIXELS guard against decompression bombs. Add Image.MAX_IMAGE_PIXELS sanity check."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter5.py (new — 18 tests for iter5 features)"
+  ],
+  "success_rate": {"backend": "94% (17/18 — 1 failure intentionally documents the CRITICAL public-access avatar bug)", "frontend": "Landing + /offers visually verified (SVG map removed, region grid present, Premium badge present on featured). Authenticated UI areas (own-profile avatar/banner upload icons, admin Premium 30j button) NOT visually verified due to login form .fill() not registering after 3 attempts."},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234!, lucas.martin@email.fr/Demo1234! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "One TEST_iter5 cascade offer + post created under TechNova in the cascade test (renames TechNova to a random TestCo_xxx during the test then restores). Avatar/banner files for lucas.martin and TechNova exist in db.files (kind=avatar|banner, ~9 entries from repeated runs). Lucas.martin has been granted premium 30j (profile.is_premium=true). Light pollution.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: REACT_APP_BACKEND_URL=https://joblink-stages.preview.emergentagent.com pytest /app/backend/tests/test_iter5.py -v. The 'test_avatar_publicly_accessible_for_img_tags' test will keep failing until the main agent patches /api/files/{id} to allow public access for kind in ('avatar','banner'). Iter3 regression suite (test_iter3.py) was not re-run this iteration but the iter5 changes only ADDED endpoints — no existing handlers were modified — so iter3 is expected to still pass. Frontend login form .fill() did not register email/password through standard input[type=email]/input[type=password] selectors (3 attempts); next agent should try page.type() or page.locator('input').nth(1) after the search bar, or check if the Login component uses non-input elements (perhaps a custom shadcn Input that needs focus first).",
+  "rca of the issue": "CRITICAL avatar/banner 401 bug — /api/files/{file_id} (server.py:1375) flow: (1) checks gallery_photo → public OK; (2) checks student_doc → visibility-based; (3) ELSE 'no reference' → requires auth.user_id == rec.user_id. Avatar/banner files have no student_doc nor gallery_photo entry and `rec['user_id']` is set, so step 3 forces ownership. Browsers never send Authorization headers on <img src> requests, so every avatar/banner returns 401. Reproduction: POST /api/me/avatar then GET /api/files/{id} without headers → 401. Fix: in server.py:1417 area, BEFORE the no-reference owner check, add: `if rec.get('kind') in ('avatar','banner'): data,ct=get_object(rec['storage_path']); return FResponse(content=data, media_type=rec.get('content_type', ct))`. Also consider adding a public Cache-Control header (e.g. 'public, max-age=3600') since avatars are immutable per file_id."
+}

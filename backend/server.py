@@ -2139,6 +2139,266 @@ async def list_connectors(user=Depends(get_current_user)):
 
 
 
+# ============ ITERATION 5: AVATAR/BANNER UPLOAD + COMPRESSION ============
+from PIL import Image
+
+def compress_image(data: bytes, max_w: int, max_h: int, quality: int = 82, fmt: str = "JPEG") -> bytes:
+    img = Image.open(io.BytesIO(data))
+    if img.mode in ("RGBA", "LA", "P"):
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        if img.mode == "P":
+            img = img.convert("RGBA")
+        bg.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+        img = bg
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+    img.thumbnail((max_w, max_h), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format=fmt, quality=quality, optimize=True)
+    return out.getvalue()
+
+@api.post("/me/avatar")
+async def upload_avatar(file: UploadFile = File(...), user=Depends(get_current_user)):
+    raw = await file.read()
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(400, "Image trop grande (max 10 Mo)")
+    try:
+        compressed = compress_image(raw, 512, 512, quality=85)
+    except Exception:
+        raise HTTPException(400, "Image invalide")
+    file_id = uuid.uuid4().hex
+    path = f"{APP_NAME}/{user['user_id']}/avatar_{file_id}.jpg"
+    put_object(path, compressed, "image/jpeg")
+    await db.files.insert_one({
+        "file_id": file_id, "user_id": user["user_id"],
+        "storage_path": path, "filename": "avatar.jpg",
+        "content_type": "image/jpeg", "size": len(compressed),
+        "kind": "avatar", "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    avatar_url = f"/api/files/{file_id}"
+    profile = user.get("profile", {})
+    key = "logo" if user["role"] == "company" else "avatar"
+    profile[key] = avatar_url
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"profile": profile}})
+    # Cascade to authored content
+    await db.posts.update_many({"author_id": user["user_id"]}, {"$set": {"author_avatar": avatar_url}})
+    await db.comments.update_many({"author_id": user["user_id"]}, {"$set": {"author_avatar": avatar_url}})
+    if user["role"] == "candidate":
+        await db.applications.update_many({"candidate_id": user["user_id"]}, {"$set": {"candidate_avatar": avatar_url}})
+    if user["role"] == "company":
+        await db.offers.update_many({"company_id": user["user_id"]}, {"$set": {"company_logo": avatar_url}})
+    return {"url": avatar_url, "file_id": file_id}
+
+@api.post("/me/banner")
+async def upload_banner(file: UploadFile = File(...), user=Depends(get_current_user)):
+    raw = await file.read()
+    if len(raw) > 12 * 1024 * 1024:
+        raise HTTPException(400, "Image trop grande (max 12 Mo)")
+    try:
+        compressed = compress_image(raw, 1600, 600, quality=82)
+    except Exception:
+        raise HTTPException(400, "Image invalide")
+    file_id = uuid.uuid4().hex
+    path = f"{APP_NAME}/{user['user_id']}/banner_{file_id}.jpg"
+    put_object(path, compressed, "image/jpeg")
+    await db.files.insert_one({
+        "file_id": file_id, "user_id": user["user_id"],
+        "storage_path": path, "filename": "banner.jpg",
+        "content_type": "image/jpeg", "size": len(compressed),
+        "kind": "banner", "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    banner_url = f"/api/files/{file_id}"
+    profile = user.get("profile", {})
+    profile["banner"] = banner_url
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"profile": profile}})
+    return {"url": banner_url, "file_id": file_id}
+
+@api.delete("/me/avatar")
+async def remove_avatar(user=Depends(get_current_user)):
+    profile = user.get("profile", {})
+    key = "logo" if user["role"] == "company" else "avatar"
+    profile.pop(key, None)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"profile": profile}})
+    return {"ok": True}
+
+@api.delete("/me/banner")
+async def remove_banner(user=Depends(get_current_user)):
+    profile = user.get("profile", {})
+    profile.pop("banner", None)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"profile": profile}})
+    return {"ok": True}
+
+# ============ ITERATION 5: CASCADING UPDATES FOR COMPANY NAME ============
+@api.put("/profile-v2")
+async def update_profile_cascade(data: dict, user=Depends(get_current_user)):
+    """Like /profile PUT, but cascades critical fields (name) to authored content."""
+    profile = user.get("profile", {})
+    profile.update({k: v for k, v in data.items() if v is not None})
+    set_doc = {"profile": profile}
+    # If company name changed, cascade and also update root `name`
+    if user["role"] == "company":
+        new_name = profile.get("company_name")
+        if new_name and new_name != user.get("name"):
+            set_doc["name"] = new_name
+            await db.offers.update_many({"company_id": user["user_id"]}, {"$set": {"company_name": new_name}})
+            await db.applications.update_many({"company_id": user["user_id"]}, {"$set": {"company_name": new_name}})
+            await db.posts.update_many({"author_id": user["user_id"]}, {"$set": {"author_name": new_name}})
+            await db.comments.update_many({"author_id": user["user_id"]}, {"$set": {"author_name": new_name}})
+            await db.messages.update_many({"from_id": user["user_id"]}, {"$set": {"from_name": new_name}})
+            await db.messages.update_many({"to_id": user["user_id"]}, {"$set": {"to_name": new_name}})
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": set_doc})
+    updated = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password": 0})
+    return updated
+
+# ============ ITERATION 5: PREMIUM CANDIDATES ============
+@api.get("/candidates/featured")
+async def featured_candidates(limit: int = 12):
+    """Random selection of candidates with premium priority, weighted shuffle."""
+    import random
+    premium = await db.users.find({"role": "candidate", "profile.is_premium": True}, {"_id": 0, "password": 0}).to_list(200)
+    regular = await db.users.find({"role": "candidate", "profile.is_premium": {"$ne": True}}, {"_id": 0, "password": 0}).to_list(500)
+    # Filter expired premium
+    now = datetime.now(timezone.utc)
+    valid_premium = []
+    for p in premium:
+        end = p.get("profile", {}).get("premium_end_date")
+        if end:
+            try:
+                end_dt = datetime.fromisoformat(end)
+                if end_dt.tzinfo is None: end_dt = end_dt.replace(tzinfo=timezone.utc)
+                if end_dt > now:
+                    valid_premium.append(p)
+                    continue
+            except Exception:
+                pass
+        valid_premium.append(p)
+    random.shuffle(valid_premium)
+    random.shuffle(regular)
+    n_prem = min(len(valid_premium), max(1, limit // 2)) if valid_premium else 0
+    result = valid_premium[:n_prem]
+    remaining = limit - len(result)
+    result.extend(regular[:remaining])
+    # Mark featured flag for UI
+    for p in result:
+        p["is_premium"] = bool(p.get("profile", {}).get("is_premium"))
+    return result
+
+@api.post("/admin/grant-premium/{user_id}")
+async def grant_premium(user_id: str, days: int = 30, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin")
+    target = await db.users.find_one({"user_id": user_id})
+    if not target:
+        raise HTTPException(404, "Introuvable")
+    p = target.get("profile", {})
+    now = datetime.now(timezone.utc)
+    p["is_premium"] = True
+    p["premium_start_date"] = now.isoformat()
+    p["premium_end_date"] = (now + timedelta(days=days)).isoformat()
+    p["premium_status"] = "active"
+    await db.users.update_one({"user_id": user_id}, {"$set": {"profile": p}})
+    return {"ok": True, "until": p["premium_end_date"]}
+
+# ============ ITERATION 5: MONGO INDEXES ============
+async def ensure_indexes():
+    try:
+        await db.offers.create_index([("city", 1)])
+        await db.offers.create_index([("region", 1)])
+        await db.offers.create_index([("source", 1)])
+        await db.offers.create_index([("status", 1)])
+        await db.offers.create_index([("contract_type", 1)])
+        await db.offers.create_index([("created_at", -1)])
+        await db.offers.create_index([("company_id", 1)])
+        await db.users.create_index([("role", 1)])
+        await db.users.create_index([("profile.region", 1)])
+        await db.users.create_index([("profile.city", 1)])
+        await db.users.create_index([("profile.is_premium", 1)])
+        await db.applications.create_index([("candidate_id", 1)])
+        await db.applications.create_index([("company_id", 1)])
+        await db.applications.create_index([("status", 1)])
+        await db.messages.create_index([("conv_id", 1), ("created_at", 1)])
+        await db.messages.create_index([("to_id", 1), ("read", 1)])
+        await db.deals.create_index([("status", 1)])
+        await db.deals.create_index([("author_id", 1)])
+        await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+        logger.info("Mongo indexes ensured")
+    except Exception as e:
+        logger.warning(f"Index creation failed: {e}")
+
+# ============ ITERATION 5: REAL FRANCE TRAVAIL CONNECTOR ============
+FT_CLIENT_ID = os.environ.get("FRANCE_TRAVAIL_CLIENT_ID")
+FT_CLIENT_SECRET = os.environ.get("FRANCE_TRAVAIL_CLIENT_SECRET")
+FT_TOKEN_URL = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
+FT_SEARCH_URL = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+_ft_token_cache = {"token": None, "expires_at": None}
+
+async def get_france_travail_token():
+    now = datetime.now(timezone.utc)
+    if _ft_token_cache["token"] and _ft_token_cache["expires_at"] > now:
+        return _ft_token_cache["token"]
+    if not FT_CLIENT_ID or not FT_CLIENT_SECRET:
+        raise HTTPException(503, "France Travail non configuré (FRANCE_TRAVAIL_CLIENT_ID/SECRET requis)")
+    r = requests.post(FT_TOKEN_URL, data={
+        "grant_type": "client_credentials",
+        "client_id": FT_CLIENT_ID, "client_secret": FT_CLIENT_SECRET,
+        "scope": "api_offresdemploiv2 o2dsoffre",
+    }, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+    _ft_token_cache["token"] = data["access_token"]
+    _ft_token_cache["expires_at"] = now + timedelta(seconds=data.get("expires_in", 1500) - 30)
+    return _ft_token_cache["token"]
+
+class FranceTravailRealConnector(ExternalConnector):
+    name = "FranceTravail"
+    enabled = bool(FT_CLIENT_ID and FT_CLIENT_SECRET)
+    api_endpoint = "https://candidat.francetravail.fr"
+
+    async def fetch(self, query="", location="", limit=20):
+        if not self.enabled:
+            # Fall back to simulation
+            return [self._make_offer(i, f"Alternance {query or 'Commerce'}", location or "Lyon", "Auvergne-Rhône-Alpes", "alternance") for i in range(limit)]
+        token = await get_france_travail_token()
+        params = {"natureContrat": "E2,FS", "range": f"0-{min(limit-1, 149)}"}
+        if query: params["motsCles"] = query
+        if location: params["commune"] = location
+        r = requests.get(FT_SEARCH_URL, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=20)
+        if r.status_code not in (200, 206):
+            logger.error(f"FT API error: {r.status_code} {r.text[:200]}")
+            return []
+        data = r.json()
+        offers = []
+        for o in data.get("resultats", []):
+            offers.append({
+                "offer_id": f"ext_ft_{o.get('id')}",
+                "company_id": None,
+                "company_name": (o.get("entreprise") or {}).get("nom") or "Entreprise non renseignée",
+                "company_logo": (o.get("entreprise") or {}).get("logo"),
+                "verified": False, "source": "FranceTravail",
+                "external_url": f"https://candidat.francetravail.fr/offres/recherche/detail/{o.get('id')}",
+                "title": o.get("intitule", ""),
+                "contract_type": "alternance" if (o.get("natureContrat") or "").startswith("Contrat d'apprentissage") or (o.get("typeContrat") or "") == "CAP" else "stage",
+                "domain": (o.get("secteurActiviteLibelle") or "Multi-domaine"),
+                "city": (o.get("lieuTravail") or {}).get("libelle", "").split(" - ")[-1] if (o.get("lieuTravail") or {}).get("libelle") else "France",
+                "region": "France",
+                "remote": False, "duration": (o.get("dureeTravailLibelle") or ""),
+                "rhythm": None, "start_date": o.get("dateActualisation", ""),
+                "level": (o.get("formations") or [{}])[0].get("niveauLibelle", "Tous niveaux"),
+                "skills": [c.get("libelle", "") for c in (o.get("competences") or [])[:5]],
+                "description": (o.get("description") or "")[:500],
+                "profile": "", "benefits": "", "salary": (o.get("salaire") or {}).get("libelle", ""),
+                "views": 0, "status": "active",
+                "created_at": o.get("dateCreation", datetime.now(timezone.utc).isoformat()),
+            })
+        return offers
+
+# Replace the stub with the real connector
+CONNECTORS["FranceTravail"] = FranceTravailRealConnector()
+
+
+
 app.include_router(api)
 
 app.add_middleware(
@@ -2174,6 +2434,8 @@ async def startup():
         logger.info("Storage initialized")
     except Exception as e:
         logger.warning(f"Storage init deferred: {e}")
+    # Mongo indexes
+    await ensure_indexes()
 
 @app.on_event("shutdown")
 async def shutdown():

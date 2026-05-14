@@ -26,6 +26,13 @@ export default function AdminPage() {
     const r = await api.get("/admin/users"); setUsers(r.data);
   };
 
+  const grantPremium = async (uid) => {
+    await api.post(`/admin/grant-premium/${uid}?days=30`);
+    toast.success("Premium accordé 30 jours");
+    const r = await api.get("/admin/users"); setUsers(r.data);
+  };
+
+
   return (
     <div className="min-h-screen pt-20 pb-12 bg-slate-50">
       <div className="max-w-6xl mx-auto px-6">
@@ -57,6 +64,10 @@ export default function AdminPage() {
                         <Button size="sm" onClick={() => verify(u.user_id)} className="rounded-full" data-testid={`verify-${u.user_id}`}>Vérifier</Button>
                       )}
                       {u.profile?.verified && <CheckCircle2 className="w-4 h-4 text-blue-500" />}
+                      {u.role === "candidate" && !u.profile?.is_premium && (
+                        <Button size="sm" variant="outline" onClick={() => grantPremium(u.user_id)} className="rounded-full ml-1 text-amber-700 border-amber-200" data-testid={`premium-${u.user_id}`}>Premium 30j</Button>
+                      )}
+                      {u.profile?.is_premium && <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full ml-1">Premium</span>}
                     </td>
                   </tr>
                 ))}

@@ -25,7 +25,7 @@ export default function LandingPage() {
         const [o, c, ca, s] = await Promise.all([
           api.get("/offers?limit=6"),
           api.get("/users?role=company&limit=8"),
-          api.get("/users?role=candidate&limit=8"),
+          api.get("/candidates/featured?limit=8"),
           api.get("/offers/regions"),
         ]);
         setOffers(o.data);
@@ -126,24 +126,23 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* France Map */}
+      {/* Regions overview (no map) */}
       <section className="py-20 bg-white border-y border-slate-200">
-        <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center">
-          <div>
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-10">
             <span className="text-xs font-bold uppercase tracking-[0.15em] text-violet-600">Explorer par région</span>
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mt-2 mb-4">Des opportunités partout en France</h2>
-            <p className="text-slate-600 mb-6 leading-relaxed">Cliquez sur une région pour découvrir les entreprises qui recrutent et les offres disponibles près de chez vous.</p>
-            <div className="grid grid-cols-2 gap-3">
-              {(stats.by_region || []).slice(0, 6).map((r) => (
-                <button key={r.region} onClick={() => navigate(`/offers?region=${encodeURIComponent(r.region)}`)} className="card-soft p-4 text-left hover-lift hover:border-blue-300" data-testid={`region-card-${r.region.replace(/\s/g, "_")}`}>
-                  <div className="text-xs text-slate-500 mb-1">{r.region}</div>
-                  <div className="text-2xl font-black text-slate-900">{r.offers}</div>
-                  <div className="text-xs text-slate-500">{r.companies} entreprises</div>
-                </button>
-              ))}
-            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mt-2 mb-3">Des opportunités partout en France</h2>
+            <p className="text-slate-600 max-w-2xl mx-auto">Cliquez sur une région pour découvrir les entreprises qui recrutent et les offres disponibles.</p>
           </div>
-          <FranceMap stats={stats} onSelect={(r) => r && navigate(`/offers?region=${encodeURIComponent(r)}`)} />
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {(stats.by_region || []).slice(0, 12).map((r) => (
+              <button key={r.region} onClick={() => navigate(`/offers?region=${encodeURIComponent(r.region)}`)} className="card-soft p-5 text-left hover-lift hover:border-blue-300" data-testid={`region-card-${r.region.replace(/\s/g, "_")}`}>
+                <div className="text-xs text-slate-500 mb-1 truncate">{r.region}</div>
+                <div className="text-3xl font-black gradient-text">{r.offers}</div>
+                <div className="text-xs text-slate-500 mt-1">{r.companies} entreprises</div>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -191,30 +190,38 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Candidates */}
+      {/* Featured candidates with premium priority */}
       <section className="py-20">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex items-end justify-between mb-8">
             <div>
               <span className="text-xs font-bold uppercase tracking-[0.15em] text-violet-600">Talents disponibles</span>
-              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mt-2">Stagiaires & alternants</h2>
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mt-2">Stagiaires & alternants en vedette</h2>
             </div>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {candidates.map((c) => (
-              <Link key={c.user_id} to={`/profile/${c.user_id}`} className="card-soft p-5 hover-lift hover:border-violet-300" data-testid={`candidate-card-${c.user_id}`}>
+              <Link key={c.user_id} to={`/profile/${c.user_id}`} className={`card-soft p-5 hover-lift relative ${c.is_premium ? "ring-2 ring-amber-300 border-amber-200" : "hover:border-violet-300"}`} data-testid={`candidate-card-${c.user_id}`}>
+                {c.is_premium && (
+                  <div className="absolute -top-2 -right-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] font-black uppercase px-2 py-0.5 rounded-full shadow-md">Premium</div>
+                )}
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-blue-400 to-violet-400 grid place-items-center text-white font-bold shrink-0">
-                    {c.profile?.avatar ? <img src={c.profile.avatar} className="w-full h-full object-cover" alt="" /> : c.name?.[0]}
+                    {c.profile?.avatar ? <img src={c.profile.avatar.startsWith("/api") ? `${process.env.REACT_APP_BACKEND_URL}${c.profile.avatar}` : c.profile.avatar} className="w-full h-full object-cover" alt="" /> : c.name?.[0]}
                   </div>
                   <div className="min-w-0">
                     <div className="font-bold text-slate-900 truncate">{c.name}</div>
                     <div className="text-xs text-slate-500 truncate">{c.profile?.title || c.profile?.domain}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${c.profile?.status === "en_recherche" ? "bg-emerald-500" : "bg-amber-400"}`} />
-                  <span className="text-xs text-slate-600">{c.profile?.status === "en_recherche" ? "En recherche active" : "À l'écoute"}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${c.profile?.status === "en_recherche" ? "bg-emerald-500" : "bg-amber-400"}`} />
+                    <span className="text-xs text-slate-600">{c.profile?.status === "en_recherche" ? "En recherche" : "À l'écoute"}</span>
+                  </div>
+                  {c.profile?.contract_type && (
+                    <span className="text-[10px] font-bold uppercase text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{c.profile.contract_type === "stage" ? "Stage" : "Alt."}</span>
+                  )}
                 </div>
               </Link>
             ))}

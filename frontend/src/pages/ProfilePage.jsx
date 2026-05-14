@@ -62,7 +62,7 @@ export default function ProfilePage() {
 
   const saveProfile = async () => {
     try {
-      await api.put("/profile", form);
+      await api.put("/profile-v2", form);
       await refreshUser();
       const { data } = await api.get(`/users/${id}`);
       setProfile(data);
@@ -71,6 +71,43 @@ export default function ProfilePage() {
     } catch {
       toast.error("Erreur");
     }
+  };
+
+  const uploadAvatar = async (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await api.post("/me/avatar", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("Photo de profil mise à jour");
+      await refreshUser();
+      reload();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Erreur upload");
+    }
+  };
+  const uploadBanner = async (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await api.post("/me/banner", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("Bannière mise à jour");
+      await refreshUser();
+      reload();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Erreur upload");
+    }
+  };
+  const removeAvatar = async () => {
+    if (!window.confirm("Supprimer la photo ?")) return;
+    await api.delete("/me/avatar");
+    await refreshUser();
+    reload();
+  };
+  const removeBanner = async () => {
+    if (!window.confirm("Supprimer la bannière ?")) return;
+    await api.delete("/me/banner");
+    await refreshUser();
+    reload();
   };
 
   const requestContact = async () => {
@@ -132,17 +169,29 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen pt-16 pb-12 bg-slate-50">
       {/* Banner */}
-      <div className="h-48 sm:h-64 bg-gradient-to-br from-blue-500 to-violet-600 relative overflow-hidden">
-        {p.banner && <img src={p.banner} alt="" className="w-full h-full object-cover" />}
+      <div className="h-48 sm:h-64 bg-gradient-to-br from-blue-500 to-violet-600 relative overflow-hidden group">
+        {p.banner && <img src={resolveUrl(p.banner)} alt="" className="w-full h-full object-cover" />}
+        {isOwn && (
+          <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+            <BannerUpload onUpload={uploadBanner} />
+            {p.banner && <Button onClick={removeBanner} size="sm" variant="outline" className="rounded-full bg-white/90" data-testid="remove-banner-btn"><X className="w-3.5 h-3.5" /></Button>}
+          </div>
+        )}
       </div>
 
       <div className="max-w-5xl mx-auto px-6">
         <div className="card-soft -mt-20 relative p-6 sm:p-8">
           <div className="flex flex-col sm:flex-row gap-5">
-            <div className="w-28 h-28 rounded-2xl bg-white p-1 -mt-16 shrink-0">
+            <div className="w-28 h-28 rounded-2xl bg-white p-1 -mt-16 shrink-0 relative group">
               <div className="w-full h-full rounded-xl bg-slate-100 overflow-hidden grid place-items-center font-black text-2xl text-slate-400">
-                {(p.avatar || p.logo) ? <img src={p.avatar || p.logo} alt="" className="w-full h-full object-cover" /> : profile.name[0]}
+                {(p.avatar || p.logo) ? <img src={resolveUrl(p.avatar || p.logo)} alt="" className="w-full h-full object-cover" /> : profile.name[0]}
               </div>
+              {isOwn && (
+                <div className="absolute bottom-1 right-1 flex gap-1">
+                  <AvatarUpload onUpload={uploadAvatar} />
+                  {(p.avatar || p.logo) && <button onClick={removeAvatar} className="bg-white rounded-full p-1.5 shadow-md hover:bg-rose-50" data-testid="remove-avatar-btn"><X className="w-3.5 h-3.5 text-rose-600" /></button>}
+                </div>
+              )}
             </div>
             <div className="flex-1">
               <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -340,3 +389,36 @@ const Field = ({ label, value, onChange, testid }) => (
     <Input value={value || ""} onChange={(e) => onChange(e.target.value)} className="rounded-xl mt-1" data-testid={testid} />
   </div>
 );
+
+function resolveUrl(u) {
+  if (!u) return u;
+  if (u.startsWith("/api/")) return process.env.REACT_APP_BACKEND_URL + u;
+  return u;
+}
+
+function AvatarUpload({ onUpload }) {
+  const ref = React.useRef();
+  return (
+    <>
+      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" data-testid="avatar-upload-input"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ""; }} />
+      <button onClick={() => ref.current?.click()} className="bg-white rounded-full p-1.5 shadow-md hover:bg-blue-50" data-testid="avatar-upload-btn"
+        title="Modifier la photo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </button>
+    </>
+  );
+}
+
+function BannerUpload({ onUpload }) {
+  const ref = React.useRef();
+  return (
+    <>
+      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" data-testid="banner-upload-input"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ""; }} />
+      <Button onClick={() => ref.current?.click()} size="sm" variant="outline" className="rounded-full bg-white/90" data-testid="banner-upload-btn">
+        Modifier la bannière
+      </Button>
+    </>
+  );
+}
