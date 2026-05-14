@@ -21,6 +21,15 @@ import ContactsPage from "./pages/ContactsPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminPage from "./pages/AdminPage";
+import DealsPage from "./pages/DealsPage";
+import DealDetailPage from "./pages/DealDetailPage";
+import NewDealPage from "./pages/NewDealPage";
+import MyDealsPage from "./pages/MyDealsPage";
+import SubscribePage from "./pages/SubscribePage";
+import BoostPage from "./pages/BoostPage";
+import PaymentSuccessPage from "./pages/PaymentSuccessPage";
+import PaymentCancelPage from "./pages/PaymentCancelPage";
+import AdminMonetizationPage from "./pages/AdminMonetizationPage";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -52,6 +61,15 @@ function AppRouter() {
         <Route path="/notifications" element={<Protected><NotificationsPage /></Protected>} />
         <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
         <Route path="/admin" element={<Protected><AdminPage /></Protected>} />
+        <Route path="/deals" element={<DealsPage />} />
+        <Route path="/deals/new" element={<Protected><NewDealPage /></Protected>} />
+        <Route path="/deals/mine" element={<Protected><MyDealsPage /></Protected>} />
+        <Route path="/deals/:id" element={<DealDetailPage />} />
+        <Route path="/payments/subscribe" element={<Protected><SubscribePage /></Protected>} />
+        <Route path="/payments/boost" element={<Protected><BoostPage /></Protected>} />
+        <Route path="/payment/success" element={<PaymentSuccessPage />} />
+        <Route path="/payment/cancel" element={<PaymentCancelPage />} />
+        <Route path="/admin/monetization" element={<Protected><AdminMonetizationPage /></Protected>} />
       </Routes>
     </>
   );

@@ -1,0 +1,38 @@
+{
+  "summary": "Tested new Bons Plans (deals) + monetization (Stripe) endpoints and UI for iteration 2. 20/20 backend pytest tests pass. Frontend flows verified: public /deals page, candidate /deals/new (pending banner), company-no-sub banner with goto-subscribe, /payments/subscribe with 2 plans, S'abonner click redirects to checkout.stripe.com, /admin/monetization dashboard. One real backend bug found: GET /api/payments/status/{session_id} returns HTTP 500 (unhandled stripe._error.InvalidRequestError) when Stripe SDK retrieve fails — should catch and return cached transaction.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/payments/status/{session_id}", "issue": "Raises HTTP 500 when Stripe retrieve fails (e.g. session not yet propagated or unknown). Should catch CheckoutError/InvalidRequestError and return the cached tx with payment_status='pending'. Repro: create checkout then immediately GET status — stripe returns 404 'No such checkout.session' and server crashes with unhandled exception."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/deals/new (forms)", "issues": ["Date d'expiration uses browser-default date picker (input type=date) instead of shadcn Calendar component — minor consistency issue."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_deals_payments.py", "/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_iter2.xml"],
+  "action_items": [
+    "Wrap stripe_co.get_checkout_status(session_id) in try/except in GET /api/payments/status/{session_id}; on Stripe error return the cached tx dict (payment_status='pending') instead of HTTP 500.",
+    "(Optional) Replace native <input type='date'> on NewDealPage with shadcn Calendar/DatePicker for consistency."
+  ],
+  "critical_code_review_comments": [
+    "server.py grown to 1325 lines — split into routers (auth, offers, deals, payments, admin, posts, social) is now strongly recommended.",
+    "payment_status endpoint trusts the Stripe SDK to always succeed; should be defensive (the same fragility could break the /payment/success page in production).",
+    "/api/payments/checkout creates a payment_transactions row before knowing the checkout session is usable — fine, but no cleanup job for stuck 'initiated' rows.",
+    "validate_deal uses untyped `body: dict` — switch to a Pydantic model (e.g. {action: Literal['approve','refuse','disable']}).",
+    "/api/deals/{id}/click and /share have no auth and no rate limit — trivially spammable to inflate stats.",
+    "company_subscription_active mutates DB inside a read path (auto-expire) — acceptable but consider a background job.",
+    "fulfill_transaction sets old active subs to 'renewed' then inserts a new one — multiple historic 'renewed' rows accumulate; cleaner to mark previous as 'replaced' or upsert."
+  ],
+  "updated_files": ["/app/backend/tests/test_deals_payments.py"],
+  "success_rate": {"backend": "100% (20/20 new tests)", "frontend": "100% (deals list, new deal flow candidate+company, subscribe page redirect, admin monetization)"},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234!, lucas.martin@email.fr/Demo1234!",
+  "seed_data_creation": "Tests insert active subscription via pymongo for hr@technova.fr (cleaned up by fixture teardown). Created several TEST_ prefixed deals; cleaned via mongosh post-run.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New regression suite at /app/backend/tests/test_deals_payments.py covers deals CRUD/save/click/share/views, admin pending+validate, checkout for sub_monthly/sub_yearly/boost_student/boost_company with correct 400/403 guards, subscription me/cancel, admin monetization. To simulate an active company subscription, the fixture inserts directly into db.subscriptions with status='active' and a 30d future end_date. Stripe session creation works (returns checkout.stripe.com URL) but GET /payments/status/{session_id} currently 500s for unpaid sessions — main agent must wrap stripe retrieve in try/except.",
+  "rca of the issue": "Endpoint GET /api/payments/status/{session_id} (server.py:1238) calls stripe_co.get_checkout_status(session_id). emergentintegrations.payments.stripe.checkout raises CheckoutError when stripe SDK throws InvalidRequestError ('No such checkout.session'). The error is not caught and bubbles up as HTTP 500. Fix: wrap in try/except CheckoutError; on failure, return the cached `tx` (payment_status='pending'). This unblocks the /payment/success polling path."
+}

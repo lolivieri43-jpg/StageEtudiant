@@ -887,6 +887,415 @@ async def seed(force: bool = False):
 async def root():
     return {"name": "StagiaireConnect API", "status": "ok"}
 
+# ============ DEALS / BONS PLANS + MONETIZATION ============
+try:
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+    STRIPE_AVAILABLE = True
+except ImportError:
+    STRIPE_AVAILABLE = False
+
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
+
+# Fixed price packages (defined server-side ONLY for security)
+PACKAGES = {
+    "sub_monthly": {"amount": 1.00, "currency": "eur", "kind": "subscription", "period": "monthly", "days": 30},
+    "sub_yearly": {"amount": 10.00, "currency": "eur", "kind": "subscription", "period": "yearly", "days": 365},
+    "boost_student": {"amount": 1.00, "currency": "eur", "kind": "boost", "actor": "candidate", "days": 7},
+    "boost_company": {"amount": 10.00, "currency": "eur", "kind": "boost", "actor": "company", "days": 7},
+}
+
+DealStatus = Literal["draft", "pending", "published", "refused", "expired"]
+
+class DealIn(BaseModel):
+    title: str
+    description: str
+    category: Optional[str] = "general"  # food, sport, culture, transport, study, fashion, tech
+    city: Optional[str] = None
+    region: Optional[str] = None
+    image: Optional[str] = None
+    promo_code: Optional[str] = None
+    discount: Optional[str] = None  # "-20%", "Gratuit", "10€ offerts"
+    url: Optional[str] = None
+    expires_at: Optional[str] = None  # ISO date
+
+class CheckoutIn(BaseModel):
+    package_id: str
+    origin_url: str
+    deal_id: Optional[str] = None  # required for boosts
+
+async def company_subscription_active(company_id: str) -> bool:
+    sub = await db.subscriptions.find_one({"company_id": company_id, "status": "active"}, {"_id": 0})
+    if not sub:
+        return False
+    end = sub.get("end_date")
+    if isinstance(end, str):
+        end = datetime.fromisoformat(end)
+    if end and end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    if end and end < datetime.now(timezone.utc):
+        await db.subscriptions.update_one({"sub_id": sub["sub_id"]}, {"$set": {"status": "expired"}})
+        return False
+    return True
+
+@api.post("/deals")
+async def create_deal(data: DealIn, user=Depends(get_current_user)):
+    if user["role"] == "company":
+        if not await company_subscription_active(user["user_id"]):
+            raise HTTPException(402, "Abonnement Pro Bons Plans requis pour publier")
+        status = "published"
+    else:
+        status = "pending"  # student: needs admin validation
+    deal_id = f"deal_{uuid.uuid4().hex[:12]}"
+    doc = {
+        "deal_id": deal_id,
+        "author_id": user["user_id"],
+        "author_name": user["name"],
+        "author_type": user["role"],
+        "author_avatar": user.get("profile", {}).get("avatar") or user.get("profile", {}).get("logo"),
+        **data.model_dump(),
+        "status": status,
+        "boosted_until": None,
+        "sponsored_until": None,
+        "views": 0,
+        "clicks": 0,
+        "saves": [],
+        "shares": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.deals.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.get("/deals")
+async def list_deals(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    region: Optional[str] = None,
+    city: Optional[str] = None,
+    author_type: Optional[str] = None,
+    status: Optional[str] = "published",
+    limit: int = 60,
+):
+    query = {}
+    if status:
+        query["status"] = status
+    if q:
+        query["$or"] = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
+        ]
+    if category: query["category"] = category
+    if region: query["region"] = region
+    if city: query["city"] = {"$regex": city, "$options": "i"}
+    if author_type: query["author_type"] = author_type
+    deals = await db.deals.find(query, {"_id": 0}).to_list(limit)
+    now = datetime.now(timezone.utc)
+    def tier(d):
+        s = d.get("sponsored_until")
+        b = d.get("boosted_until")
+        if s and datetime.fromisoformat(s).replace(tzinfo=timezone.utc) > now: return 0
+        if b and datetime.fromisoformat(b).replace(tzinfo=timezone.utc) > now: return 1
+        return 2
+    deals.sort(key=lambda d: (tier(d), d.get("created_at", ""), ), reverse=False)
+    # Then reverse-sort by date within same tier
+    deals.sort(key=lambda d: (tier(d), -datetime.fromisoformat(d["created_at"]).timestamp()))
+    return deals
+
+@api.get("/deals/mine")
+async def my_deals(user=Depends(get_current_user)):
+    deals = await db.deals.find({"author_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    saved_ids = []
+    for d in await db.deals.find({"saves": user["user_id"]}, {"_id": 0, "deal_id": 1}).to_list(200):
+        saved_ids.append(d["deal_id"])
+    saved = await db.deals.find({"deal_id": {"$in": saved_ids}}, {"_id": 0}).to_list(200)
+    boosts = await db.boost_orders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return {"deals": deals, "saved": saved, "boosts": boosts}
+
+@api.get("/deals/{deal_id}")
+async def get_deal(deal_id: str):
+    d = await db.deals.find_one({"deal_id": deal_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Bon plan introuvable")
+    await db.deals.update_one({"deal_id": deal_id}, {"$inc": {"views": 1}})
+    d["views"] = d.get("views", 0) + 1
+    return d
+
+@api.patch("/deals/{deal_id}")
+async def update_deal(deal_id: str, data: dict, user=Depends(get_current_user)):
+    d = await db.deals.find_one({"deal_id": deal_id})
+    if not d:
+        raise HTTPException(404, "Introuvable")
+    if d["author_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    if d["author_type"] == "company" and user["role"] != "admin":
+        if not await company_subscription_active(user["user_id"]):
+            raise HTTPException(402, "Abonnement requis")
+    allowed = {"title", "description", "category", "city", "region", "image", "promo_code", "discount", "url", "expires_at"}
+    upd = {k: v for k, v in data.items() if k in allowed}
+    if upd:
+        await db.deals.update_one({"deal_id": deal_id}, {"$set": upd})
+    return {"ok": True}
+
+@api.delete("/deals/{deal_id}")
+async def delete_deal(deal_id: str, user=Depends(get_current_user)):
+    d = await db.deals.find_one({"deal_id": deal_id})
+    if not d:
+        raise HTTPException(404, "Introuvable")
+    if d["author_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    await db.deals.delete_one({"deal_id": deal_id})
+    return {"ok": True}
+
+@api.post("/deals/{deal_id}/save")
+async def save_deal(deal_id: str, user=Depends(get_current_user)):
+    d = await db.deals.find_one({"deal_id": deal_id})
+    if not d:
+        raise HTTPException(404, "Introuvable")
+    saves = d.get("saves", [])
+    if user["user_id"] in saves:
+        saves.remove(user["user_id"])
+    else:
+        saves.append(user["user_id"])
+        if d["author_id"] != user["user_id"]:
+            await notify(d["author_id"], "deal_save", f"{user['name']} a sauvegardé votre bon plan \"{d['title']}\"", f"/deals/{deal_id}")
+    await db.deals.update_one({"deal_id": deal_id}, {"$set": {"saves": saves}})
+    return {"saves": saves}
+
+@api.post("/deals/{deal_id}/click")
+async def click_deal(deal_id: str):
+    await db.deals.update_one({"deal_id": deal_id}, {"$inc": {"clicks": 1}})
+    return {"ok": True}
+
+@api.post("/deals/{deal_id}/share")
+async def share_deal(deal_id: str):
+    await db.deals.update_one({"deal_id": deal_id}, {"$inc": {"shares": 1}})
+    return {"ok": True}
+
+# Admin: validation
+@api.post("/admin/deals/{deal_id}/validate")
+async def validate_deal(deal_id: str, body: dict, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin")
+    action = body.get("action")  # "approve" / "refuse" / "disable"
+    deal = await db.deals.find_one({"deal_id": deal_id})
+    if not deal:
+        raise HTTPException(404, "Introuvable")
+    new_status = {"approve": "published", "refuse": "refused", "disable": "expired"}.get(action)
+    if not new_status:
+        raise HTTPException(400, "Action invalide")
+    await db.deals.update_one({"deal_id": deal_id}, {"$set": {"status": new_status}})
+    await notify(deal["author_id"], "deal_validation", f"Votre bon plan \"{deal['title']}\" est {new_status}", f"/deals/{deal_id}")
+    return {"ok": True}
+
+@api.get("/admin/deals/pending")
+async def admin_pending_deals(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin")
+    return await db.deals.find({"status": "pending"}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+# Subscription status
+@api.get("/subscriptions/me")
+async def my_subscription(user=Depends(get_current_user)):
+    sub = await db.subscriptions.find_one({"company_id": user["user_id"], "status": "active"}, {"_id": 0})
+    if sub and sub.get("end_date"):
+        end = sub["end_date"]
+        if isinstance(end, str):
+            end_dt = datetime.fromisoformat(end)
+            if end_dt.tzinfo is None: end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if end_dt < datetime.now(timezone.utc):
+                await db.subscriptions.update_one({"sub_id": sub["sub_id"]}, {"$set": {"status": "expired"}})
+                sub["status"] = "expired"
+    history = await db.payment_transactions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return {"subscription": sub, "history": history}
+
+@api.post("/subscriptions/cancel")
+async def cancel_sub(user=Depends(get_current_user)):
+    sub = await db.subscriptions.find_one({"company_id": user["user_id"], "status": "active"})
+    if not sub:
+        raise HTTPException(404, "Aucun abonnement actif")
+    await db.subscriptions.update_one({"sub_id": sub["sub_id"]}, {"$set": {"status": "canceled"}})
+    return {"ok": True}
+
+# ============ PAYMENTS (Stripe Checkout) ============
+@api.post("/payments/checkout")
+async def create_checkout(body: CheckoutIn, request: Request, user=Depends(get_current_user)):
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(500, "Module de paiement indisponible")
+    pkg = PACKAGES.get(body.package_id)
+    if not pkg:
+        raise HTTPException(400, "Package invalide")
+    if pkg["kind"] == "subscription" and user["role"] != "company":
+        raise HTTPException(403, "Réservé aux entreprises")
+    if pkg["kind"] == "boost":
+        if not body.deal_id:
+            raise HTTPException(400, "deal_id requis")
+        deal = await db.deals.find_one({"deal_id": body.deal_id}, {"_id": 0})
+        if not deal:
+            raise HTTPException(404, "Bon plan introuvable")
+        if deal["author_id"] != user["user_id"]:
+            raise HTTPException(403, "Pas votre bon plan")
+        if pkg["actor"] == "candidate" and user["role"] != "candidate":
+            raise HTTPException(403, "Boost étudiant réservé aux étudiants")
+        if pkg["actor"] == "company" and user["role"] != "company":
+            raise HTTPException(403, "Boost entreprise réservé aux entreprises")
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    origin = body.origin_url.rstrip("/")
+    success_url = f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/payment/cancel"
+    metadata = {
+        "package_id": body.package_id,
+        "user_id": user["user_id"],
+        "user_role": user["role"],
+        "kind": pkg["kind"],
+    }
+    if body.deal_id:
+        metadata["deal_id"] = body.deal_id
+    req = CheckoutSessionRequest(amount=pkg["amount"], currency=pkg["currency"], success_url=success_url, cancel_url=cancel_url, metadata=metadata)
+    session = await stripe_co.create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "tx_id": f"tx_{uuid.uuid4().hex[:12]}",
+        "session_id": session.session_id,
+        "user_id": user["user_id"],
+        "user_role": user["role"],
+        "package_id": body.package_id,
+        "amount": pkg["amount"],
+        "currency": pkg["currency"],
+        "kind": pkg["kind"],
+        "deal_id": body.deal_id,
+        "metadata": metadata,
+        "payment_status": "pending",
+        "status": "initiated",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"url": session.url, "session_id": session.session_id}
+
+async def fulfill_transaction(tx: dict):
+    """Apply business effect once payment is confirmed (idempotent)."""
+    if tx.get("fulfilled"):
+        return
+    pkg_id = tx["package_id"]
+    pkg = PACKAGES.get(pkg_id, {})
+    now = datetime.now(timezone.utc)
+    if pkg.get("kind") == "subscription":
+        end = now + timedelta(days=pkg["days"])
+        await db.subscriptions.update_many({"company_id": tx["user_id"], "status": "active"}, {"$set": {"status": "renewed"}})
+        await db.subscriptions.insert_one({
+            "sub_id": f"sub_{uuid.uuid4().hex[:12]}",
+            "company_id": tx["user_id"],
+            "plan_type": pkg_id,
+            "period": pkg["period"],
+            "price": pkg["amount"],
+            "status": "active",
+            "start_date": now.isoformat(),
+            "end_date": end.isoformat(),
+            "renewal_date": end.isoformat(),
+            "stripe_session_id": tx["session_id"],
+            "created_at": now.isoformat(),
+        })
+    elif pkg.get("kind") == "boost":
+        end = now + timedelta(days=pkg["days"])
+        boost_field = "sponsored_until" if pkg["actor"] == "company" else "boosted_until"
+        if tx.get("deal_id"):
+            await db.deals.update_one({"deal_id": tx["deal_id"]}, {"$set": {boost_field: end.isoformat()}})
+        await db.boost_orders.insert_one({
+            "boost_id": f"boost_{uuid.uuid4().hex[:12]}",
+            "user_id": tx["user_id"],
+            "user_type": tx["user_role"],
+            "deal_id": tx.get("deal_id"),
+            "boost_type": "sponsored" if pkg["actor"] == "company" else "highlight",
+            "price": pkg["amount"],
+            "duration_days": pkg["days"],
+            "start_date": now.isoformat(),
+            "end_date": end.isoformat(),
+            "status": "active",
+            "session_id": tx["session_id"],
+            "created_at": now.isoformat(),
+        })
+    await db.payment_transactions.update_one({"tx_id": tx["tx_id"]}, {"$set": {"fulfilled": True}})
+    await db.revenue_logs.insert_one({
+        "log_id": f"rev_{uuid.uuid4().hex[:10]}",
+        "amount": tx["amount"],
+        "currency": tx["currency"],
+        "kind": tx["kind"],
+        "user_id": tx["user_id"],
+        "package_id": pkg_id,
+        "at": now.isoformat(),
+    })
+
+@api.get("/payments/status/{session_id}")
+async def payment_status(session_id: str, request: Request):
+    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(404, "Transaction introuvable")
+    if tx.get("payment_status") == "paid":
+        return tx
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(500, "Stripe indisponible")
+    host_url = str(request.base_url).rstrip("/")
+    stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+    res = await stripe_co.get_checkout_status(session_id)
+    new_status = res.payment_status
+    upd = {"payment_status": new_status, "status": res.status}
+    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": upd})
+    tx.update(upd)
+    if new_status == "paid":
+        await fulfill_transaction(tx)
+    return tx
+
+@api.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    if not STRIPE_AVAILABLE:
+        return {"ok": False}
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature")
+    host_url = str(request.base_url).rstrip("/")
+    stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+    try:
+        evt = await stripe_co.handle_webhook(body, sig)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return {"ok": False}
+    if evt.payment_status == "paid":
+        tx = await db.payment_transactions.find_one({"session_id": evt.session_id}, {"_id": 0})
+        if tx and not tx.get("fulfilled"):
+            await db.payment_transactions.update_one({"session_id": evt.session_id}, {"$set": {"payment_status": "paid", "status": "complete"}})
+            tx["payment_status"] = "paid"
+            await fulfill_transaction(tx)
+    return {"ok": True}
+
+# Admin monetization
+@api.get("/admin/monetization")
+async def admin_monetization(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin")
+    active_subs = await db.subscriptions.find({"status": "active"}, {"_id": 0}).to_list(500)
+    monthly = sum(1 for s in active_subs if s.get("period") == "monthly")
+    yearly = sum(1 for s in active_subs if s.get("period") == "yearly")
+    revenue = await db.revenue_logs.find({}, {"_id": 0}).to_list(2000)
+    total = sum(r["amount"] for r in revenue)
+    boost_student_rev = sum(r["amount"] for r in revenue if r["package_id"] == "boost_student")
+    boost_company_rev = sum(r["amount"] for r in revenue if r["package_id"] == "boost_company")
+    sub_rev = sum(r["amount"] for r in revenue if r["kind"] == "subscription")
+    failed = await db.payment_transactions.count_documents({"payment_status": {"$in": ["failed", "expired"]}})
+    canceled = await db.subscriptions.count_documents({"status": "canceled"})
+    transactions = await db.payment_transactions.find({}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    return {
+        "active_subs": len(active_subs),
+        "monthly_subs": monthly,
+        "yearly_subs": yearly,
+        "total_revenue": total,
+        "subscription_revenue": sub_rev,
+        "boost_student_revenue": boost_student_rev,
+        "boost_company_revenue": boost_company_rev,
+        "failed_payments": failed,
+        "canceled_subs": canceled,
+        "transactions": transactions,
+    }
+
+
+
 app.include_router(api)
 
 app.add_middleware(

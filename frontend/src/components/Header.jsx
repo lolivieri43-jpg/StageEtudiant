@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper } from "lucide-react";
+import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/api";
 import { Button } from "./ui/button";
@@ -71,6 +71,10 @@ export default function Header() {
               <Briefcase className="w-5 h-5" />
               <span className="text-[10px] font-medium">Offres</span>
             </Link>
+            <Link to="/deals" className="hidden md:flex flex-col items-center px-3 py-1 text-slate-600 hover:text-violet-600" data-testid="nav-deals">
+              <Tag className="w-5 h-5" />
+              <span className="text-[10px] font-medium">Bons plans</span>
+            </Link>
             <Link to="/contacts" className="hidden md:flex flex-col items-center px-3 py-1 text-slate-600 hover:text-blue-600" data-testid="nav-contacts">
               <Users className="w-5 h-5" />
               <span className="text-[10px] font-medium">Réseau</span>
@@ -96,8 +100,10 @@ export default function Header() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate("/dashboard")} data-testid="menu-dashboard"><LayoutDashboard className="w-4 h-4 mr-2" />Tableau de bord</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate(`/profile/${user.user_id}`)} data-testid="menu-profile"><User className="w-4 h-4 mr-2" />Mon profil</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/deals/mine")} data-testid="menu-mydeals"><Tag className="w-4 h-4 mr-2" />Mes bons plans</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-settings">Paramètres</DropdownMenuItem>
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">Administration</DropdownMenuItem>}
+                {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/monetization")} data-testid="menu-monetization">Monétisation</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} data-testid="menu-logout" className="text-red-600"><LogOut className="w-4 h-4 mr-2" />Déconnexion</DropdownMenuItem>
               </DropdownMenuContent>

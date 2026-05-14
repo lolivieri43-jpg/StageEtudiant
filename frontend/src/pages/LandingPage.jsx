@@ -222,6 +222,31 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Bons plans teaser */}
+      <section className="py-20 bg-gradient-to-br from-violet-50 to-blue-50">
+        <div className="max-w-5xl mx-auto px-6 grid md:grid-cols-2 gap-10 items-center">
+          <div>
+            <span className="text-xs font-bold uppercase tracking-[0.15em] text-violet-600">Nouveau</span>
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mt-2 mb-4">Bons plans étudiants</h2>
+            <p className="text-slate-600 mb-6 leading-relaxed">
+              Réductions, codes promo et avantages partagés par la communauté et les entreprises partenaires. <strong>Gratuit pour les étudiants.</strong>
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link to="/deals"><Button className="rounded-full bg-violet-600 hover:bg-violet-700" data-testid="cta-deals">Découvrir les bons plans</Button></Link>
+              <Link to="/payments/subscribe"><Button variant="outline" className="rounded-full" data-testid="cta-subscribe">Entreprise : 1€/mois</Button></Link>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {["-30% Pizza", "Code -20%", "Cinéma 5€", "Sport offert"].map((tag, i) => (
+              <div key={i} className="card-soft p-5 text-center hover-lift">
+                <div className="text-2xl font-black gradient-text">{tag.split(" ")[0]}</div>
+                <div className="text-xs text-slate-500 mt-1">{tag.split(" ").slice(1).join(" ")}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* CTA */}
       <section className="py-24 bg-gradient-to-br from-blue-600 to-violet-700 text-white">
         <div className="max-w-4xl mx-auto px-6 text-center">
