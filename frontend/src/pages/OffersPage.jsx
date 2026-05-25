@@ -16,9 +16,20 @@ import { Checkbox } from "../components/ui/checkbox";
 import { Badge } from "../components/ui/badge";
 
 const SOURCES = [
-  "StageConnect", "HelloWork", "LinkedIn", "Indeed", "WelcomeToTheJungle",
-  "FranceTravail", "JobTeaser", "StudentJob", "LEtudiant", "Apec",
-  "Meteojob", "Monster", "TalentCom",
+  { id: "StageConnect", label: "StageEtudiant" },
+  { id: "La Bonne Alternance", label: "La Bonne Alternance ★" },
+  { id: "FranceTravail", label: "France Travail" },
+  { id: "HelloWork", label: "HelloWork" },
+  { id: "LinkedIn", label: "LinkedIn" },
+  { id: "Indeed", label: "Indeed" },
+  { id: "WelcomeToTheJungle", label: "Welcome to the Jungle" },
+  { id: "JobTeaser", label: "JobTeaser" },
+  { id: "StudentJob", label: "StudentJob" },
+  { id: "LEtudiant", label: "L'Étudiant" },
+  { id: "Apec", label: "Apec" },
+  { id: "Meteojob", label: "Meteojob" },
+  { id: "Monster", label: "Monster" },
+  { id: "TalentCom", label: "Talent.com" },
 ];
 
 export default function OffersPage() {
@@ -50,17 +61,19 @@ export default function OffersPage() {
 
   useEffect(() => {
     setLoading(true);
+    const lbaOnly = source === "La Bonne Alternance";
     const fetchLba = async () => {
-      if (!includeLba) return [];
-      if (ct && ct !== "alternance") return []; // only when alternance or all contracts
+      if (!includeLba && !lbaOnly) return [];
+      if (!lbaOnly && ct && ct !== "alternance") return []; // when not LBA-only, only when alternance/all
       try {
         const lbaCity = nearCity || city;
-        if (!lbaCity && !region) return []; // avoid pulling national default to keep relevance
-        const params = new URLSearchParams();
-        if (lbaCity) params.set("city", lbaCity);
-        params.set("radius", nearCity ? distanceKm : "30");
-        params.set("per_page", "30");
-        const { data } = await api.get(`/lba/search?${params.toString()}`);
+        // For LBA-only filter, always fetch (Paris default if no city); for merge mode, require a geo hint
+        if (!lbaOnly && !lbaCity && !region) return [];
+        const lbaParams = new URLSearchParams();
+        if (lbaCity) lbaParams.set("city", lbaCity);
+        lbaParams.set("radius", nearCity ? distanceKm : "30");
+        lbaParams.set("per_page", lbaOnly ? "60" : "30");
+        const { data } = await api.get(`/lba/search?${lbaParams.toString()}`);
         return data.results || [];
       } catch (err) {
         console.warn("LBA fetch failed", err);
@@ -68,6 +81,7 @@ export default function OffersPage() {
       }
     };
     const fetchInternal = async () => {
+      if (lbaOnly) return []; // do not fetch internal offers when LBA is the selected source
       if (nearCity) {
         const p = new URLSearchParams();
         p.set("city", nearCity);
@@ -156,7 +170,7 @@ export default function OffersPage() {
           <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Source</label>
           <select data-testid="filter-source" value={source} onChange={(e) => updateParam("source", e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 h-10 text-sm bg-white">
             <option value="">Toutes</option>
-            {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+            {SOURCES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
         </div>
         <div className="bg-gradient-to-br from-blue-50 to-violet-50 rounded-xl p-4 -mx-2">

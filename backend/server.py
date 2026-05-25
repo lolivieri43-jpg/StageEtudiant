@@ -1572,6 +1572,7 @@ async def list_sources():
             {"id": "Meteojob", "label": "Meteojob", "internal": False},
             {"id": "Monster", "label": "Monster", "internal": False},
             {"id": "TalentCom", "label": "Talent.com", "internal": False},
+            {"id": "La Bonne Alternance", "label": "La Bonne Alternance", "internal": False, "official": True},
         ]
     }
 
