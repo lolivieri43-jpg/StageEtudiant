@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../lib/api";
+import { triggerBlobDownload } from "../lib/download";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -77,12 +78,11 @@ export default function CVPage() {
     try {
       const resp = await api.get(url, { responseType: "blob" });
       const blob = new Blob([resp.data], { type: "application/pdf" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `CV-${owner?.name?.replace(/\s/g, "_") || "candidat"}.pdf`;
-      link.click();
-    } catch {
-      toast.error("Export PDF impossible");
+      triggerBlobDownload(blob, `CV-${owner?.name?.replace(/\s/g, "_") || "candidat"}.pdf`);
+      toast.success("Téléchargement lancé");
+    } catch (err) {
+      console.error("CV PDF download error", err);
+      toast.error(err?.response?.data?.detail || "Export PDF impossible");
     }
   };
 

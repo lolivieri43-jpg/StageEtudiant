@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Download, Trash2, Sparkles, Building2, MapPin, FileSpreadsheet, FileText, FileType2 } from "lucide-react";
 import { toast } from "sonner";
+import { triggerBlobDownload } from "../lib/download";
 
 const STATUSES = [
   { id: "a_contacter", label: "À contacter", color: "bg-slate-100 text-slate-700" },
@@ -44,13 +45,10 @@ export default function MyCompaniesPage() {
   const exportAs = async (fmt) => {
     try {
       const resp = await api.get(`/me/companies/export?fmt=${fmt}`, { responseType: "blob" });
-      const blob = new Blob([resp.data]);
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `entreprises.${fmt}`;
-      a.click();
+      triggerBlobDownload(resp.data, `entreprises.${fmt}`);
       toast.success(`Export ${fmt.toUpperCase()} prêt`);
-    } catch {
+    } catch (err) {
+      console.error("Export error", err);
       toast.error("Export impossible");
     }
   };

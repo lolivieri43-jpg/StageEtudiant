@@ -40,6 +40,7 @@ export default function OffersPage() {
   const source = params.get("source") || "";
   const nearCity = params.get("near_city") || "";
   const distanceKm = params.get("distance_km") || "50";
+  const includeLba = params.get("lba") !== "0"; // include La Bonne Alternance by default
   const [cityList, setCityList] = useState([]);
 
   useEffect(() => {
@@ -49,28 +50,62 @@ export default function OffersPage() {
 
   useEffect(() => {
     setLoading(true);
-    if (nearCity) {
+    const fetchLba = async () => {
+      if (!includeLba) return [];
+      if (ct && ct !== "alternance") return []; // only when alternance or all contracts
+      try {
+        const lbaCity = nearCity || city;
+        if (!lbaCity && !region) return []; // avoid pulling national default to keep relevance
+        const params = new URLSearchParams();
+        if (lbaCity) params.set("city", lbaCity);
+        params.set("radius", nearCity ? distanceKm : "30");
+        params.set("per_page", "30");
+        const { data } = await api.get(`/lba/search?${params.toString()}`);
+        return data.results || [];
+      } catch (err) {
+        console.warn("LBA fetch failed", err);
+        return [];
+      }
+    };
+    const fetchInternal = async () => {
+      if (nearCity) {
+        const p = new URLSearchParams();
+        p.set("city", nearCity);
+        p.set("distance_km", distanceKm);
+        if (ct) p.set("contract_type", ct);
+        if (source) p.set("source", source);
+        p.set("limit", "200");
+        const r = await api.get(`/offers-nearby?${p.toString()}`);
+        return r.data;
+      }
       const p = new URLSearchParams();
-      p.set("city", nearCity);
-      p.set("distance_km", distanceKm);
+      if (q) p.set("q", q);
+      if (region) p.set("region", region);
+      if (city) p.set("city", city);
       if (ct) p.set("contract_type", ct);
+      if (domain) p.set("domain", domain);
+      if (level) p.set("level", level);
+      if (remote) p.set("remote", "true");
       if (source) p.set("source", source);
-      p.set("limit", "200");
-      api.get(`/offers-nearby?${p.toString()}`).then((r) => setOffers(r.data)).finally(() => setLoading(false));
-      return;
-    }
-    const p = new URLSearchParams();
-    if (q) p.set("q", q);
-    if (region) p.set("region", region);
-    if (city) p.set("city", city);
-    if (ct) p.set("contract_type", ct);
-    if (domain) p.set("domain", domain);
-    if (level) p.set("level", level);
-    if (remote) p.set("remote", "true");
-    if (source) p.set("source", source);
-    p.set("limit", "300");
-    api.get(`/offers?${p.toString()}`).then((r) => setOffers(r.data)).finally(() => setLoading(false));
-  }, [q, region, city, ct, domain, level, remote, source, nearCity, distanceKm]);
+      p.set("limit", "300");
+      const r = await api.get(`/offers?${p.toString()}`);
+      return r.data;
+    };
+    Promise.all([fetchInternal(), fetchLba()])
+      .then(([internal, lba]) => {
+        // Merge — internal first, then LBA. dedupe by siret if any
+        const seen = new Set();
+        const merged = [];
+        for (const o of [...internal, ...lba]) {
+          const k = o.offer_id || o.siret;
+          if (k && seen.has(k)) continue;
+          seen.add(k);
+          merged.push(o);
+        }
+        setOffers(merged);
+      })
+      .finally(() => setLoading(false));
+  }, [q, region, city, ct, domain, level, remote, source, nearCity, distanceKm, includeLba]);
 
   const updateParam = (k, v) => {
     const p = new URLSearchParams(params);
@@ -137,6 +172,13 @@ export default function OffersPage() {
             </div>
           )}
         </div>
+        <label className="flex items-center gap-2 cursor-pointer bg-amber-50 -mx-2 px-3 py-2 rounded-xl" data-testid="filter-lba">
+          <input type="checkbox" checked={includeLba} onChange={(e) => updateParam("lba", e.target.checked ? "" : "0")} className="accent-amber-600" />
+          <div>
+            <div className="text-sm font-bold text-amber-900">Inclure La Bonne Alternance</div>
+            <div className="text-[10px] text-amber-700">Offres officielles gouv (alternance)</div>
+          </div>
+        </label>
         <label className="flex items-center gap-2 cursor-pointer" data-testid="filter-remote">
           <Checkbox checked={remote} onCheckedChange={(v) => updateParam("remote", v ? "true" : "")} />
           <span className="text-sm font-medium">Télétravail possible</span>

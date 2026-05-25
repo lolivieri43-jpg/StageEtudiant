@@ -3614,6 +3614,66 @@ async def admin_api_stats(days: int = 30, user=Depends(get_current_user)):
 
 app.include_router(phase_api)  # register Phase C/D/E endpoints
 
+
+# ============ ITERATION 10: La Bonne Alternance integration ============
+from labonnealternance import search_alternance as lba_search
+
+lba_api = APIRouter(prefix="/api")
+
+CITY_TO_GEO = {
+    "paris": (48.8566, 2.3522), "lyon": (45.7640, 4.8357), "marseille": (43.2965, 5.3698),
+    "toulouse": (43.6047, 1.4442), "nice": (43.7102, 7.2620), "nantes": (47.2184, -1.5536),
+    "strasbourg": (48.5734, 7.7521), "montpellier": (43.6112, 3.8767), "bordeaux": (44.8378, -0.5792),
+    "lille": (50.6292, 3.0573), "rennes": (48.1173, -1.6778), "reims": (49.2583, 4.0317),
+    "toulon": (43.1242, 5.9280), "saint-étienne": (45.4397, 4.3872), "le havre": (49.4944, 0.1079),
+    "grenoble": (45.1885, 5.7245), "dijon": (47.3220, 5.0415), "angers": (47.4784, -0.5632),
+    "nîmes": (43.8367, 4.3601), "villeurbanne": (45.7665, 4.8795),
+    "valence": (44.9333, 4.8920), "perpignan": (42.6886, 2.8946),
+}
+
+
+def _resolve_geo(city: Optional[str], lat: Optional[float], lon: Optional[float]):
+    if lat is not None and lon is not None:
+        return float(lat), float(lon)
+    if city:
+        key = city.strip().lower()
+        if key in CITY_TO_GEO:
+            return CITY_TO_GEO[key]
+    return None, None
+
+
+@lba_api.get("/lba/search")
+async def alternance_search(
+    city: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    radius: int = 30,
+    romes: Optional[str] = None,
+    per_page: int = 30,
+    user=Depends(get_optional_user),
+):
+    """Search apprenticeship/alternance offers via La Bonne Alternance (official gouv API)."""
+    lat, lon = _resolve_geo(city, latitude, longitude)
+    if lat is None:
+        lat, lon = 48.8566, 2.3522  # default Paris
+    return await lba_search(
+        db, latitude=lat, longitude=lon, radius=radius,
+        romes=romes or DEFAULT_LBA_ROMES, per_page=per_page,
+    )
+
+
+@lba_api.delete("/admin/lba-cache")
+async def admin_clear_lba_cache(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    r = await db.lba_search_cache.delete_many({})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+DEFAULT_LBA_ROMES = "M1805,M1810,M1802,M1803,E1101,E1103,K1207,K1801,M1707,M1701,M1402,M1502"
+
+app.include_router(lba_api)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

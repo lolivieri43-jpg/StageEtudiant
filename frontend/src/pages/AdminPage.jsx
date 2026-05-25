@@ -153,9 +153,10 @@ export default function AdminPage() {
         {cache && (
           <div className="card-soft p-6 mb-6" data-testid="admin-cache">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 className="font-bold">Cache annuaire entreprises</h2>
+              <h2 className="font-bold">Cache annuaire entreprises + La Bonne Alternance</h2>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" className="rounded-full" onClick={async () => { await api.delete('/admin/external-cache?scope=search'); const r = await api.get('/admin/external-cache'); setCache(r.data); toast.success('Cache recherches vidé'); }} data-testid="purge-search">Purger recherches</Button>
+                <Button size="sm" variant="outline" className="rounded-full" onClick={async () => { await api.delete('/admin/lba-cache'); toast.success('Cache LBA vidé'); }} data-testid="purge-lba">Purger LBA</Button>
                 <Button size="sm" variant="outline" className="rounded-full text-rose-600 border-rose-200" onClick={async () => { await api.delete('/admin/external-cache?scope=all'); const r = await api.get('/admin/external-cache'); setCache(r.data); toast.success('Cache entier vidé'); }} data-testid="purge-all">Tout purger</Button>
               </div>
             </div>

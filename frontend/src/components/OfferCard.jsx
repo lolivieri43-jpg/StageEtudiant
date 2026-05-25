@@ -17,10 +17,12 @@ const SOURCE_LABELS = {
   Meteojob: "Meteojob",
   Monster: "Monster",
   TalentCom: "Talent.com",
+  "La Bonne Alternance": "LBA",
 };
 
 export default function OfferCard({ offer }) {
-  const isExternal = offer.source && offer.source !== "StageConnect" && offer.external_url;
+  const isExternalUrl = offer.source && offer.source !== "StageConnect" && (offer.external_url || offer.apply_url);
+  const externalHref = offer.external_url || offer.apply_url;
   const sourceLabel = SOURCE_LABELS[offer.source] || offer.source || "StageConnect";
   const inner = (
     <>
@@ -60,7 +62,7 @@ export default function OfferCard({ offer }) {
           </div>
         </div>
       </div>
-      {isExternal && (
+      {isExternalUrl && (
         <div className="mt-3 text-xs text-red-600 font-semibold flex items-center gap-1">
           <ExternalLink className="w-3 h-3" />Ouvrir sur {sourceLabel}
         </div>
@@ -68,9 +70,9 @@ export default function OfferCard({ offer }) {
     </>
   );
 
-  if (isExternal) {
+  if (isExternalUrl) {
     return (
-      <a href={offer.external_url} target="_blank" rel="noopener noreferrer" className="card-soft p-5 block hover-lift hover:border-red-300 relative" data-testid={`offer-card-${offer.offer_id}`}>
+      <a href={externalHref} target="_blank" rel="noopener noreferrer" className="card-soft p-5 block hover-lift hover:border-red-300 relative" data-testid={`offer-card-${offer.offer_id}`}>
         {inner}
       </a>
     );

@@ -7,6 +7,7 @@ import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Download, MessageSquare, User, CheckCircle2, XCircle, Calendar, Archive, FileText, FileCheck2, Eye } from "lucide-react";
 import { toast } from "sonner";
+import { triggerBlobDownload } from "../lib/download";
 
 const STATUS_LABELS = {
   envoyee: "Envoyée",
@@ -47,11 +48,10 @@ export default function ApplicationDetailPage() {
       const tpl = a.online_cv_template || "modern";
       const resp = await api.get(`/applications/${id}/cv/export?template=${tpl}`, { responseType: "blob" });
       const blob = new Blob([resp.data], { type: "application/pdf" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `CV-${candidate?.name?.replace(/\s/g, "_") || "candidat"}.pdf`;
-      link.click();
-    } catch {
+      triggerBlobDownload(blob, `CV-${candidate?.name?.replace(/\s/g, "_") || "candidat"}.pdf`);
+      toast.success("Téléchargement lancé");
+    } catch (err) {
+      console.error("App CV download error", err);
       toast.error("Export PDF impossible");
     }
   };
