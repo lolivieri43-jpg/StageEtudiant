@@ -87,24 +87,25 @@ def normalize_ft_offer(raw: dict) -> dict:
     lt = raw.get("lieuTravail") or {}
     ent = raw.get("entreprise") or {}
     origine = raw.get("origineOffre") or {}
-    contact = raw.get("contact") or {}
-    contract_type = "alternance" if (raw.get("alternance") or raw.get("natureContrat", "").lower().startswith("contrat apprentissage")
-                                     or raw.get("natureContrat") in ("E2", "FS")) else (
-        "stage" if raw.get("natureContrat") in ("E1", "FA") and raw.get("typeContrat") in ("CDD",) else
-        (raw.get("typeContrat") or "").lower()
-    )
+    nature = raw.get("natureContrat") or ""
+    is_alt = bool(raw.get("alternance")) or nature in ("E2", "FS")
+    contract_type = "alternance" if is_alt else "stage" if nature in ("E1", "FA") else (raw.get("typeContrat") or "").lower()
+    commune = (lt.get("commune") or "")
+    postal = (lt.get("codePostal") or "")
+    dept = commune[:2] if commune else (postal[:2] if postal else None)
+    libelle = lt.get("libelle") or ""
     return {
         "offer_id": f"ft_{raw.get('id')}",
         "title": raw.get("intitule") or "Offre France Travail",
         "description": (raw.get("description") or "")[:5000],
         "contract_type": contract_type,
-        "experience_type": "alternance" if (raw.get("alternance") or raw.get("natureContrat") in ("E2", "FS")) else "stage",
+        "experience_type": "alternance" if is_alt else "stage",
         "company_name": ent.get("nom") or "Entreprise non communiquée",
         "company_logo": ent.get("logo"),
         "company_id": None,
-        "city": (lt.get("libelle") or "").split(" - ", 1)[-1] if lt.get("libelle") else None,
-        "postal_code": lt.get("codePostal"),
-        "department": (lt.get("commune") or "")[:2] if lt.get("commune") else None,
+        "city": libelle.split(" - ", 1)[-1] if " - " in libelle else libelle or None,
+        "postal_code": postal or None,
+        "department": dept,
         "region": None,
         "latitude": lt.get("latitude"),
         "longitude": lt.get("longitude"),
