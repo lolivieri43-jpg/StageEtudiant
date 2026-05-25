@@ -3675,6 +3675,68 @@ DEFAULT_LBA_ROMES = "M1805,M1810,M1802,M1803,E1101,E1103,K1207,K1801,M1707,M1701
 
 app.include_router(lba_api)
 
+
+# ============ ITERATION 11: France Travail (Offres v2) ============
+from francetravail import search_offers as ft_search
+
+ft_api = APIRouter(prefix="/api")
+
+CITY_TO_DEPT = {
+    "paris": "75", "lyon": "69", "marseille": "13", "toulouse": "31",
+    "nice": "06", "nantes": "44", "strasbourg": "67", "montpellier": "34",
+    "bordeaux": "33", "lille": "59", "rennes": "35", "reims": "51",
+    "toulon": "83", "saint-étienne": "42", "le havre": "76",
+    "grenoble": "38", "dijon": "21", "angers": "49", "nîmes": "30",
+    "villeurbanne": "69", "valence": "26", "perpignan": "66",
+    "ile-de-france": "75", "île-de-france": "75", "auvergne-rhône-alpes": "69",
+}
+
+
+def _resolve_ft_dept(city: Optional[str], region: Optional[str], dept: Optional[str]) -> Optional[str]:
+    if dept: return dept[:2]
+    if city:
+        key = city.strip().lower()
+        if key in CITY_TO_DEPT: return CITY_TO_DEPT[key]
+    if region:
+        key = region.strip().lower()
+        if key in CITY_TO_DEPT: return CITY_TO_DEPT[key]
+    return None
+
+
+@ft_api.get("/francetravail/search")
+async def francetravail_search(
+    city: Optional[str] = None,
+    region: Optional[str] = None,
+    departement: Optional[str] = None,
+    domain: Optional[str] = None,
+    q: Optional[str] = None,
+    nature: str = "E2,FS",
+    per_page: int = 30,
+):
+    """Search alternance/stage offers from France Travail (Pôle Emploi)."""
+    dept = _resolve_ft_dept(city, region, departement)
+    if not dept:
+        dept = "75"  # default Paris if nothing specified
+    return await ft_search(
+        db,
+        departement=dept,
+        mots_cles=q,
+        domain=domain,
+        nature_contrat=nature,
+        per_page=per_page,
+    )
+
+
+@ft_api.delete("/admin/ft-cache")
+async def admin_clear_ft_cache(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    r = await db.ft_search_cache.delete_many({})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+app.include_router(ft_api)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

@@ -62,7 +62,9 @@ export default function OffersPage() {
   useEffect(() => {
     setLoading(true);
     const lbaOnly = source === "La Bonne Alternance";
+    const ftOnly = source === "FranceTravail";
     const fetchLba = async () => {
+      if (ftOnly) return []; // do not mix LBA with FT-only
       if (!includeLba && !lbaOnly) return [];
       if (!lbaOnly && ct && ct !== "alternance") return []; // when not LBA-only, only when alternance/all
       try {
@@ -80,8 +82,24 @@ export default function OffersPage() {
         return [];
       }
     };
+    const fetchFt = async () => {
+      if (!ftOnly) return [];
+      try {
+        const ftParams = new URLSearchParams();
+        if (city) ftParams.set("city", city);
+        if (region) ftParams.set("region", region);
+        if (q) ftParams.set("q", q);
+        if (domain) ftParams.set("domain", domain);
+        ftParams.set("per_page", "50");
+        const { data } = await api.get(`/francetravail/search?${ftParams.toString()}`);
+        return data.results || [];
+      } catch (err) {
+        console.warn("FT fetch failed", err);
+        return [];
+      }
+    };
     const fetchInternal = async () => {
-      if (lbaOnly) return []; // do not fetch internal offers when LBA is the selected source
+      if (lbaOnly || ftOnly) return []; // do not fetch internal offers when an external source is selected
       if (nearCity) {
         const p = new URLSearchParams();
         p.set("city", nearCity);
@@ -105,12 +123,12 @@ export default function OffersPage() {
       const r = await api.get(`/offers?${p.toString()}`);
       return r.data;
     };
-    Promise.all([fetchInternal(), fetchLba()])
-      .then(([internal, lba]) => {
-        // Merge — internal first, then LBA. dedupe by siret if any
+    Promise.all([fetchInternal(), fetchLba(), fetchFt()])
+      .then(([internal, lba, ft]) => {
+        // Merge — internal first, then LBA, then FT. dedupe by siret/offer_id
         const seen = new Set();
         const merged = [];
-        for (const o of [...internal, ...lba]) {
+        for (const o of [...internal, ...lba, ...ft]) {
           const k = o.offer_id || o.siret;
           if (k && seen.has(k)) continue;
           seen.add(k);

@@ -9,7 +9,7 @@ const SOURCE_LABELS = {
   LinkedIn: "LinkedIn",
   Indeed: "Indeed",
   WelcomeToTheJungle: "WTTJ",
-  FranceTravail: "France Travail",
+  FranceTravail: "France Travail ✓",
   JobTeaser: "JobTeaser",
   StudentJob: "StudentJob",
   LEtudiant: "L'Étudiant",

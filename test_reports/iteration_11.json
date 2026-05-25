@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 11 — France Travail (Pôle Emploi) Offres v2 OAuth2 + La Bonne Alternance source addition to OffersPage. Backend (10/10 PASSED, pytest_iter11.xml): GET /api/francetravail/search?city=Paris&per_page=5 → 200 {results,total,cache_hit:false}, ≥1 offer with source='FranceTravail', offer_id ft_*, apply_url pointing to candidat.francetravail.fr; 2nd identical call → cache_hit:true with same total (TTL 4h confirmed); no-params call defaults dept=75 returns ≥1 result; departement=69 works; city=Lyon returns offers with department='69'; domain=informatique correctly forwards codeROME=M1805,M1810,M1802,M1803 (verified at least one result with a code from that set); DELETE /api/admin/ft-cache → 200 {ok:true, deleted:N} for admin, 403 for candidate, 401/403 without auth; api_request_logs records api_name='francetravail' (visible via /api/admin/api-stats by_api list with calls=18, cache_hits=8, avg_ms~350, errors=0); OAuth token cache works implicitly (10 successive search calls completed in 5.27s real-time). Frontend Playwright (7/7 PASSED on preview URL): /offers Source select contains both 'La Bonne Alternance ★' and 'France Travail' option labels; /offers?source=FranceTravail&city=Paris → 50 offer-card-ft_* cards, 0 lba_*, 0 off_* (mode FT-only); first FT card is <a target=_blank href=https://candidat.francetravail.fr/offres/recherche/detail/{id}>; FT source badge displays 'France Travail ✓'; /offers?source=La%20Bonne%20Alternance&city=Lyon → 30 offer-card-lba_* cards, 0 ft_* (LBA-only) with badge text 'LBA'; /admin admin-cache block has all 4 buttons purge-ft + purge-lba + purge-search + purge-all; clicking purge-ft fires DELETE /api/admin/ft-cache → 200 (toast 'Cache France Travail vidé').",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/francetravail/search", "issue": "No Pydantic Query bounds on per_page (FT API caps at 50 via the range computation, but values <=0 or >50 are silently clamped, no 4xx returned)."},
+      {"endpoint": "GET /api/francetravail/search", "issue": "normalize_ft_offer.city extraction uses split(' - ', 1)[-1] which on libelle='75 - PARIS 10' returns 'PARIS 10' (good), but on libelle='Paris' alone returns 'Paris' (still ok). On libelle without delimiter the logic is fragile; acceptable for now."},
+      {"endpoint": "GET /api/francetravail/search", "issue": "normalize_ft_offer.department uses commune[:2] (5-digit INSEE), but commune for Paris arrondissements is 75056/75101/...; commune[:2]='75' so OK. For Lyon arrondissement (69381 etc.), commune[:2]='69' OK. However, when commune is missing the field becomes None. Could fall back to lieuTravail.libelle prefix instead."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter11_ft.py",
+    "/app/test_reports/pytest/pytest_iter11.xml"
+  ],
+  "action_items": [
+    "(OPTIONAL) Add Pydantic Query(ge=1, le=50) bounds for per_page on /api/francetravail/search and return 422 instead of silently clamping.",
+    "(OPTIONAL) Defensive fallback in normalize_ft_offer.department when commune is missing — derive from postalCode[:2] or lieuTravail.libelle prefix.",
+    "(OPTIONAL) Add an audit-log entry for DELETE /api/admin/ft-cache (same recommendation as iter10 for /api/admin/lba-cache).",
+    "(OPTIONAL) francetravail.py still uses requests.get/post inside run_in_executor — consider migrating to httpx.AsyncClient for consistency (same recommendation as iter10 for labonnealternance.py)."
+  ],
+  "critical_code_review_comments": [
+    "francetravail.py contract_type derivation (lines 91-95) is hard to follow and has a logic bug: `raw.get('natureContrat', '').lower().startswith('contrat apprentissage')` will always be False because natureContrat is a 2-letter code ('E1','E2','FA','FS'), not a label. The `raw.get('alternance')` and `natureContrat in ('E2','FS')` checks save it, but the startswith branch is dead code. Simplify.",
+    "francetravail.py: cache TTL of 4 hours is hard-coded. Extracting to env var (FT_CACHE_TTL_HOURS) would mirror LBA cache pattern.",
+    "server.py is now 3779 lines (vs 3716 in iter10). Reiterating: split into routers/ submodules (lists, ai, admin, lba, ft) to stay under the 700-line ceiling — same comment as iter9/iter10.",
+    "server.py CITY_TO_DEPT is hard-coded with only ~20 cities. Lille, Caen, Limoges, Clermont-Ferrand and many others fall back to dept=75 (Paris). Either expand the table from a CSV or call a geocoding service.",
+    "OfferCard.jsx isExternalUrl branch (line 24) opens FT URLs in a new tab which is correct for legal compliance (FT terms require redirection to candidat.francetravail.fr), but the click-through is not logged in api_request_logs → analytics will under-count actual application intents. Consider POST /api/offers/{id}/click before redirect.",
+    "Iter11 introduces a 3rd external source (FT) in addition to LBA — the dedup logic in OffersPage Promise.all([fetchInternal, fetchLba, fetchFt]) does no de-duplication across LBA/FT for the same SIRET+title pair. If the same alternance is posted on both portals it shows twice."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter11_ft.py (new, 10 tests, 100% pass)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (7/7 critical flows: Source select labels, FT-only mode card counts, FT card external href, FT badge label, LBA-only mode card counts, LBA badge stays 'LBA', admin purge-ft button + DELETE /api/admin/ft-cache 200)"},
+  "test_credentials": "Admin: admin@stagiaireconnect.fr / Admin123!; Candidate: lucas.martin@email.fr / Demo1234! (from /app/memory/test_credentials.md). Token field in /api/auth/login is 'token'.",
+  "seed_data_creation": "None for this iteration. ft_search_cache collection was populated for Paris (default + per_page=5 + per_page=3), departement=69, city=Lyon, domain=informatique queries during testing — cleared by purge in fixture and again by purge-ft frontend click at the end. Final state contains 1 fresh warm entry (city=Paris per_page=3) which the main agent can clear via DELETE /api/admin/ft-cache if needed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "France Travail backend tests: /app/backend/tests/test_iter11_ft.py — run `pytest backend/tests/test_iter11_ft.py -v`. Real FT Offres v2 API at https://api.francetravail.io with OAuth2 client_credentials (FT_CLIENT_ID/FT_CLIENT_SECRET in /app/backend/.env). Token cached in francetravail._token_cache dict ~1500s, auto-refreshed. Search cache in MongoDB ft_search_cache collection with cache_key = sorted params join, TTL 4h. CITY_TO_DEPT map at server.py:3684 covers only top-20 French cities — unknown cities fall back to dept=75. FT cards on /offers render as <a target=_blank> when source=FranceTravail (OfferCard.jsx isExternalUrl branch). SOURCES array (OffersPage.jsx:18) is now object form {id,label}. Admin /admin page has 4 purge buttons: purge-ft, purge-lba, purge-search, purge-all — all functional. /api/admin/api-stats returns by_api as a LIST (not dict) with _id field — important for any subsequent assertions.",
+  "rca of the issue": "No bugs found. The France Travail OAuth2 + Offres v2 integration is fully working end-to-end against the real gouv.fr API (no mocks), with proper token caching, 4-hour search cache, admin-protected purge endpoint, and analytics logging. Frontend correctly differentiates LBA-only vs FT-only modes via the Source dropdown, renders FT cards as external <a target=_blank> links to candidat.francetravail.fr (FT ToS-compliant redirection), displays the new 'France Travail ✓' badge label while preserving the existing 'LBA' badge for La Bonne Alternance, and exposes the purge-ft button on /admin. All 16 acceptance criteria from the review_request are validated."
+}
