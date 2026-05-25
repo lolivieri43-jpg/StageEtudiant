@@ -36,6 +36,8 @@ import ApplicationDetailPage from "./pages/ApplicationDetailPage";
 import SavedOffersPage from "./pages/SavedOffersPage";
 import CVPage from "./pages/CVPage";
 import CompanyDirectoryPage from "./pages/CompanyDirectoryPage";
+import MyCompaniesPage from "./pages/MyCompaniesPage";
+import SearchHistoryPage from "./pages/SearchHistoryPage";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -83,6 +85,8 @@ function AppRouter() {
         <Route path="/cv" element={<Protected><CVPage /></Protected>} />
         <Route path="/cv/:id" element={<CVPage />} />
         <Route path="/companies" element={<CompanyDirectoryPage />} />
+        <Route path="/my-companies" element={<Protected><MyCompaniesPage /></Protected>} />
+        <Route path="/history" element={<Protected><SearchHistoryPage /></Protected>} />
       </Routes>
     </ThemeProvider>
   );

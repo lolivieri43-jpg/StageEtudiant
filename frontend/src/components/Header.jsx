@@ -117,7 +117,9 @@ export default function Header() {
                 <DropdownMenuItem onClick={() => navigate(`/profile/${user.user_id}`)} data-testid="menu-profile"><User className="w-4 h-4 mr-2" />Mon profil</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate("/deals/mine")} data-testid="menu-mydeals"><Tag className="w-4 h-4 mr-2" />Mes bons plans</DropdownMenuItem>
                 {user.role === "candidate" && <DropdownMenuItem onClick={() => navigate("/saved-offers")} data-testid="menu-saved">Offres sauvegardées</DropdownMenuItem>}
+                {user.role === "candidate" && <DropdownMenuItem onClick={() => navigate("/my-companies")} data-testid="menu-my-companies">Mes entreprises</DropdownMenuItem>}
                 {user.role === "candidate" && <DropdownMenuItem onClick={() => navigate("/cv")} data-testid="menu-my-cv">Mon CV en ligne</DropdownMenuItem>}
+                <DropdownMenuItem onClick={() => navigate("/history")} data-testid="menu-history">Mon historique</DropdownMenuItem>
                 {user.role === "company" && <DropdownMenuItem onClick={() => navigate("/search/students")} data-testid="menu-search-students">Rechercher des étudiants</DropdownMenuItem>}
                 <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-settings">Paramètres</DropdownMenuItem>
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">Administration</DropdownMenuItem>}

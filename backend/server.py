@@ -3303,6 +3303,317 @@ async def admin_list_external_cache(limit: int = 30, user=Depends(get_current_us
 
 app.include_router(ext_api)  # register Phase B external company endpoints
 
+
+# ============ ITERATION 9: Phase C — Student company lists + Phase D — AI search + history + Phase E — Admin analytics ============
+phase_api = APIRouter(prefix="/api")
+
+# ---------- Phase C: Student personal company lists ----------
+TRACK_STATUSES = {
+    "a_contacter", "cv_envoye", "relance_a_faire", "relance",
+    "reponse_recue", "refus", "entretien_obtenu",
+    "stage_obtenu", "alternance_obtenue",
+}
+
+
+@phase_api.post("/me/companies")
+async def add_company_to_list(body: dict, user=Depends(get_current_user)):
+    """Add an external (or internal) company to the student's tracking list."""
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    siret = body.get("siret")
+    siren = body.get("siren")
+    name = body.get("name")
+    if not name:
+        raise HTTPException(400, "Nom requis")
+    # idempotent on (user_id, siret) when siret present, else on (user_id, name)
+    key = {"user_id": user["user_id"]}
+    if siret: key["siret"] = siret
+    else: key["name"] = name
+    existing = await db.student_company_lists.find_one(key)
+    if existing:
+        return {"ok": True, "duplicate": True, "id": existing["id"]}
+    doc = {
+        "id": f"tc_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "name": name,
+        "siret": siret,
+        "siren": siren,
+        "city": body.get("city"),
+        "postal_code": body.get("postal_code"),
+        "region": body.get("region"),
+        "address": body.get("address"),
+        "naf_code": body.get("naf_code"),
+        "website": body.get("website"),
+        "email": body.get("email"),
+        "phone": body.get("phone"),
+        "status": body.get("status", "a_contacter"),
+        "note": body.get("note", ""),
+        "relance_date": body.get("relance_date"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.student_company_lists.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@phase_api.get("/me/companies")
+async def my_company_list(status: Optional[str] = None, user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    q = {"user_id": user["user_id"]}
+    if status: q["status"] = status
+    items = await db.student_company_lists.find(q, {"_id": 0}).sort("updated_at", -1).to_list(500)
+    return items
+
+
+@phase_api.patch("/me/companies/{item_id}")
+async def update_company_list_item(item_id: str, body: dict, user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    item = await db.student_company_lists.find_one({"id": item_id, "user_id": user["user_id"]})
+    if not item:
+        raise HTTPException(404, "Introuvable")
+    allowed = {"status", "note", "relance_date", "email", "phone", "website"}
+    set_doc = {k: v for k, v in body.items() if k in allowed}
+    if "status" in set_doc and set_doc["status"] not in TRACK_STATUSES:
+        raise HTTPException(400, f"Statut invalide. Acceptés: {sorted(TRACK_STATUSES)}")
+    set_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.student_company_lists.update_one({"id": item_id}, {"$set": set_doc})
+    return {"ok": True, **set_doc}
+
+
+@phase_api.delete("/me/companies/{item_id}")
+async def delete_company_list_item(item_id: str, user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    r = await db.student_company_lists.delete_one({"id": item_id, "user_id": user["user_id"]})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@phase_api.get("/me/companies/export")
+async def export_company_list(fmt: str = "csv", user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    items = await db.student_company_lists.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    columns = ["name", "siret", "naf_code", "address", "city", "postal_code", "region",
+               "website", "email", "phone", "status", "note", "relance_date"]
+    headers = ["Nom entreprise", "SIRET", "NAF/APE", "Adresse", "Ville", "Code postal", "Région",
+               "Site web", "Email", "Téléphone", "Statut", "Note", "Date relance"]
+    fmt = (fmt or "csv").lower()
+    if fmt == "csv":
+        import csv, io as _io
+        buf = _io.StringIO()
+        w = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
+        w.writerow(headers)
+        for it in items: w.writerow([(it.get(c) or "") for c in columns])
+        return FResponse(content=buf.getvalue(), media_type="text/csv",
+                         headers={"Content-Disposition": 'attachment; filename="entreprises.csv"'})
+    if fmt == "xlsx":
+        try:
+            import openpyxl
+        except Exception:
+            raise HTTPException(503, "Export XLSX indisponible (openpyxl absent)")
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Entreprises"
+        ws.append(headers)
+        for it in items: ws.append([(it.get(c) or "") for c in columns])
+        buf = io.BytesIO(); wb.save(buf)
+        return FResponse(content=buf.getvalue(),
+                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         headers={"Content-Disposition": 'attachment; filename="entreprises.xlsx"'})
+    if fmt == "pdf":
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.platypus import SimpleDocTemplate, Table as RTable, TableStyle, Paragraph
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib import colors as rl_c
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4))
+        styles = getSampleStyleSheet()
+        title = Paragraph(f"Ma liste d'entreprises ({len(items)})", styles["Title"])
+        rows = [["Entreprise", "Ville", "NAF", "Statut", "Relance", "Note"]]
+        for it in items:
+            rows.append([it.get("name",""), it.get("city",""), it.get("naf_code",""),
+                         it.get("status",""), it.get("relance_date","") or "", (it.get("note","") or "")[:60]])
+        t = RTable(rows, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), rl_c.HexColor("#2563EB")),
+            ("TEXTCOLOR", (0,0), (-1,0), rl_c.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.3, rl_c.HexColor("#94A3B8")),
+            ("FONTSIZE", (0,0), (-1,-1), 9),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [rl_c.white, rl_c.HexColor("#F1F5F9")]),
+        ]))
+        doc.build([title, t])
+        return FResponse(content=buf.getvalue(), media_type="application/pdf",
+                         headers={"Content-Disposition": 'attachment; filename="entreprises.pdf"'})
+    raise HTTPException(400, "Format invalide (csv|xlsx|pdf)")
+
+
+@phase_api.post("/ai/spontaneous-message")
+async def ai_spontaneous_message(body: dict, user=Depends(get_current_user)):
+    """Generate a spontaneous-application message from candidate profile + target company info."""
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    company = body.get("company") or {}
+    candidate_brief = body.get("brief") or ""
+    cv = await db.student_cvs.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    profile_summary = f"{cv.get('professional_title','')}. {cv.get('summary','')}. Compétences: {', '.join(cv.get('skills', []))}"
+    company_summary = f"{company.get('name','')} ({company.get('city','')}, NAF {company.get('naf_code','')})"
+    sys = ("Rédige un message court (<200 mots), poli et impactant, pour une candidature spontanée en stage/alternance. "
+           "Personnalise selon l'entreprise visée. Termine par une signature 'Cordialement,'. Réponds UNIQUEMENT avec le message.")
+    prompt = f"Profil candidat: {profile_summary}\nProjet: {candidate_brief or cv.get('contract_type_searched','stage')}\nEntreprise visée: {company_summary}"
+    try:
+        result = await call_ai(sys, prompt)
+    except Exception as e:
+        logger.error(f"AI spontaneous error: {e}")
+        raise HTTPException(500, "Erreur IA")
+    return {"message": result}
+
+
+# ---------- Phase D: AI natural-language search + search history ----------
+@phase_api.post("/ai/search")
+async def ai_search(body: dict, user=Depends(get_current_user)):
+    """Extract structured search criteria from a natural-language query."""
+    text = (body.get("query") or "").strip()
+    if not text:
+        raise HTTPException(400, "Requête vide")
+    sys = ("Tu es un assistant qui transforme une requête en français en critères de recherche JSON. "
+           "Retourne UNIQUEMENT un JSON valide avec les clés (mets null si non précisé): "
+           '{"intent":"offers|students|companies", "contract_type":"stage|alternance|null", '
+           '"city":string|null, "region":string|null, "department":string|null, '
+           '"domain":string|null, "skills":[string], "level":string|null, "naf_code":string|null, '
+           '"keywords":string}.')
+    try:
+        raw = await call_ai(sys, text)
+    except Exception as e:
+        logger.error(f"AI search error: {e}")
+        raise HTTPException(500, "Erreur IA")
+    # Parse JSON (tolerant)
+    import re, json as _json
+    m = re.search(r"\{[\s\S]+\}", raw or "")
+    criteria = {}
+    if m:
+        try: criteria = _json.loads(m.group(0))
+        except Exception: criteria = {}
+    # Log
+    try:
+        await db.ai_search_logs.insert_one({
+            "log_id": f"ai_{uuid.uuid4().hex[:10]}",
+            "user_id": user["user_id"],
+            "user_role": user.get("role"),
+            "query_text": text,
+            "criteria": criteria,
+            "raw": (raw or "")[:1000],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+    return {"criteria": criteria, "raw": raw}
+
+
+@phase_api.post("/me/search-history")
+async def add_search_history(body: dict, user=Depends(get_current_user)):
+    """Record a search performed by the user (if history enabled)."""
+    if user.get("history_disabled"):
+        return {"ok": True, "skipped": True}
+    doc = {
+        "id": f"sh_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "user_role": user.get("role"),
+        "search_type": (body.get("search_type") or "offers"),
+        "query_text": (body.get("query_text") or "")[:200],
+        "filters": body.get("filters") or {},
+        "results_count": int(body.get("results_count") or 0),
+        "ai_generated": bool(body.get("ai_generated")),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.search_history.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@phase_api.get("/me/search-history")
+async def my_search_history(limit: int = 50, user=Depends(get_current_user)):
+    items = await db.search_history.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).limit(min(limit, 200)).to_list(limit)
+    return items
+
+
+@phase_api.delete("/me/search-history/{item_id}")
+async def del_search_history_item(item_id: str, user=Depends(get_current_user)):
+    r = await db.search_history.delete_one({"id": item_id, "user_id": user["user_id"]})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@phase_api.delete("/me/search-history")
+async def clear_search_history(user=Depends(get_current_user)):
+    r = await db.search_history.delete_many({"user_id": user["user_id"]})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@phase_api.patch("/me/history-settings")
+async def set_history_disabled(body: dict, user=Depends(get_current_user)):
+    disabled = bool(body.get("history_disabled", False))
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"history_disabled": disabled}})
+    return {"ok": True, "history_disabled": disabled}
+
+
+# ---------- Phase E: Admin API stats ----------
+@phase_api.get("/admin/api-stats")
+async def admin_api_stats(days: int = 30, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cur = db.api_request_logs.aggregate([
+        {"$match": {"created_at": {"$gte": cutoff}}},
+        {"$group": {
+            "_id": "$api_name",
+            "calls": {"$sum": 1},
+            "cache_hits": {"$sum": {"$cond": ["$cache_hit", 1, 0]}},
+            "avg_ms": {"$avg": "$response_time_ms"},
+            "errors": {"$sum": {"$cond": [{"$gte": ["$status", 400]}, 1, 0]}},
+        }},
+    ])
+    by_api = [doc async for doc in cur]
+    # Top search queries (companies API + AI)
+    top_q = db.api_request_logs.aggregate([
+        {"$match": {"created_at": {"$gte": cutoff}, "query.q": {"$exists": True, "$ne": ""}}},
+        {"$group": {"_id": "$query.q", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}}, {"$limit": 10},
+    ])
+    top_queries = [doc async for doc in top_q]
+    top_dep = db.api_request_logs.aggregate([
+        {"$match": {"created_at": {"$gte": cutoff}, "query.departement": {"$exists": True, "$ne": ""}}},
+        {"$group": {"_id": "$query.departement", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}}, {"$limit": 10},
+    ])
+    top_departments = [doc async for doc in top_dep]
+    top_naf_c = db.api_request_logs.aggregate([
+        {"$match": {"created_at": {"$gte": cutoff}, "query.activite_principale": {"$exists": True, "$ne": ""}}},
+        {"$group": {"_id": "$query.activite_principale", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}}, {"$limit": 10},
+    ])
+    top_naf = [doc async for doc in top_naf_c]
+    ai_count = await db.ai_search_logs.count_documents({"created_at": {"$gte": cutoff}})
+    profile_views_count = await db.profile_views.count_documents({"viewed_at": {"$gte": cutoff}})
+    real_obtained = await db.applications.count_documents({"status": {"$in": list(OBTAINED_STATUSES)}})
+    errors = await db.api_error_logs.find({"created_at": {"$gte": cutoff}}, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
+    return {
+        "window_days": days,
+        "by_api": by_api,
+        "top_queries": [{"q": x["_id"], "count": x["n"]} for x in top_queries],
+        "top_departments": [{"department": x["_id"], "count": x["n"]} for x in top_departments],
+        "top_naf": [{"naf": x["_id"], "count": x["n"]} for x in top_naf],
+        "ai_searches": ai_count,
+        "profile_views": profile_views_count,
+        "obtained_count": real_obtained,
+        "recent_errors": errors,
+    }
+
+
+app.include_router(phase_api)  # register Phase C/D/E endpoints
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

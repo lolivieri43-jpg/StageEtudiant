@@ -8,6 +8,7 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Search, MapPin, Building2, Hash, Globe, Plus, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import AISearchBar from "../components/AISearchBar";
 
 const REGIONS = [
   { code: "11", name: "Île-de-France" }, { code: "84", name: "Auvergne-Rhône-Alpes" },
@@ -68,6 +69,12 @@ export default function CompanyDirectoryPage() {
           <h1 className="text-3xl font-black tracking-tight text-slate-900">Trouver des entreprises</h1>
           <p className="text-slate-500 mt-1">Recherchez parmi toutes les entreprises françaises (données officielles INSEE — Annuaire des Entreprises).</p>
         </div>
+
+        <AISearchBar onCriteria={(c, originalQuery) => {
+          if (c?.city) setQ(c.city);
+          if (c?.naf_code) setNaf(c.naf_code);
+          if (c?.keywords && !c?.city) setQ(c.keywords);
+        }} />
 
         <form onSubmit={submit} className="card-soft p-6 mb-6" data-testid="company-search-form">
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -138,6 +145,16 @@ export default function CompanyDirectoryPage() {
 }
 
 function ExternalCompanyCard({ company: c, canSave }) {
+  const [added, setAdded] = useState(false);
+  const addToList = async () => {
+    try {
+      await api.post("/me/companies", c);
+      setAdded(true);
+      toast.success("Ajoutée à votre liste");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Erreur");
+    }
+  };
   const addr = [c.address, c.postal_code, c.city].filter(Boolean).join(", ");
   return (
     <div className="card-soft p-5 hover-lift" data-testid={`cs-card-${c.siret}`}>
@@ -158,11 +175,12 @@ function ExternalCompanyCard({ company: c, canSave }) {
         {c.siret && <div className="text-xs text-slate-400">SIRET {c.siret}</div>}
       </div>
       <div className="flex flex-wrap gap-2">
-        {canSave && (
-          <Button size="sm" variant="outline" className="rounded-full text-blue-700 border-blue-200" data-testid={`cs-save-${c.siret}`} disabled title="Bientôt disponible">
+        {canSave && !added && (
+          <Button size="sm" onClick={addToList} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid={`cs-save-${c.siret}`}>
             <Plus className="w-3.5 h-3.5 mr-1" />Ajouter à ma liste
           </Button>
         )}
+        {added && <Badge className="rounded-full bg-emerald-50 text-emerald-700 border-0">✓ Dans ma liste</Badge>}
         {c.siret && (
           <a href={`https://annuaire-entreprises.data.gouv.fr/entreprise/${c.siret}`} target="_blank" rel="noopener" className="inline-flex items-center text-xs text-slate-500 hover:text-blue-600 gap-1" data-testid={`cs-ext-${c.siret}`}>
             <Globe className="w-3 h-3" />Voir sur l'Annuaire <ExternalLink className="w-2.5 h-2.5" />

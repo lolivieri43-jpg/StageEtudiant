@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/api";
 import OfferCard from "../components/OfferCard";
+import AISearchBar from "../components/AISearchBar";
 import FranceMap from "../components/FranceMap"; // kept import for backward compat; not rendered
 const REGIONS_LIST = [
   "Île-de-France", "Auvergne-Rhône-Alpes", "Nouvelle-Aquitaine", "Occitanie", "Hauts-de-France",
@@ -193,6 +194,15 @@ export default function OffersPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-2">Offres de stage & alternance</h1>
         <p className="text-slate-500 mb-4">{offers.length} offres · Sources multiples agrégées</p>
+
+        <AISearchBar onCriteria={(c) => {
+          const p = new URLSearchParams(params);
+          if (c?.city) p.set("city", c.city);
+          if (c?.contract_type) p.set("contract_type", c.contract_type);
+          if (c?.keywords) p.set("q", c.keywords);
+          if (c?.domain) p.set("domain", c.domain);
+          setParams(p);
+        }} />
 
         {/* Mobile toggle */}
         <div className="lg:hidden flex gap-2 mb-4">

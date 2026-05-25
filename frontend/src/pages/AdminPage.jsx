@@ -12,12 +12,16 @@ export default function AdminPage() {
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [platform, setPlatform] = useState(null);
+  const [apiStats, setApiStats] = useState(null);
+  const [cache, setCache] = useState(null);
 
   useEffect(() => {
     if (user?.role !== "admin") return;
     api.get("/admin/stats").then((r) => setStats(r.data));
     api.get("/admin/users").then((r) => setUsers(r.data));
     api.get("/admin/platform-stats").then((r) => setPlatform(r.data));
+    api.get("/admin/api-stats?days=30").then((r) => setApiStats(r.data));
+    api.get("/admin/external-cache").then((r) => setCache(r.data));
   }, [user]);
 
   if (!user || user.role !== "admin") {
@@ -119,6 +123,55 @@ export default function AdminPage() {
           </div>
         )}
 
+        {apiStats && (
+          <div className="card-soft p-6 mb-6" data-testid="admin-api-stats">
+            <h2 className="font-bold mb-3">API & Statistiques ({apiStats.window_days} derniers jours)</h2>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <Tile label="Appels API" value={apiStats.by_api[0]?.calls || 0} />
+              <Tile label="Cache hits" value={apiStats.by_api[0]?.cache_hits || 0} />
+              <Tile label="Recherches IA" value={apiStats.ai_searches} />
+              <Tile label="Vues profils" value={apiStats.profile_views} />
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <RankList title="Top recherches" rows={apiStats.top_queries.map(q => ({ label: q.q, n: q.count }))} testid="top-queries" />
+              <RankList title="Top départements" rows={apiStats.top_departments.map(q => ({ label: q.department, n: q.count }))} testid="top-departments" />
+              <RankList title="Top codes NAF" rows={apiStats.top_naf.map(q => ({ label: q.naf, n: q.count }))} testid="top-naf" />
+            </div>
+            {apiStats.recent_errors.length > 0 && (
+              <div className="mt-4">
+                <div className="text-xs font-semibold text-slate-500 mb-1">Erreurs récentes ({apiStats.recent_errors.length})</div>
+                <div className="space-y-1 text-[11px] text-rose-700">
+                  {apiStats.recent_errors.slice(0, 5).map((e, i) => (
+                    <div key={i}>{e.created_at?.slice(0,16).replace('T',' ')} · {e.error?.slice(0, 100)}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {cache && (
+          <div className="card-soft p-6 mb-6" data-testid="admin-cache">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold">Cache annuaire entreprises</h2>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="rounded-full" onClick={async () => { await api.delete('/admin/external-cache?scope=search'); const r = await api.get('/admin/external-cache'); setCache(r.data); toast.success('Cache recherches vidé'); }} data-testid="purge-search">Purger recherches</Button>
+                <Button size="sm" variant="outline" className="rounded-full text-rose-600 border-rose-200" onClick={async () => { await api.delete('/admin/external-cache?scope=all'); const r = await api.get('/admin/external-cache'); setCache(r.data); toast.success('Cache entier vidé'); }} data-testid="purge-all">Tout purger</Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <Tile label="Recherches en cache" value={cache.search_cache_count} />
+              <Tile label="Fiches détaillées en cache" value={cache.details_cache_count} />
+            </div>
+            {cache.search_cache_entries.slice(0, 6).map((e, i) => (
+              <div key={i} className="text-xs text-slate-500 border-t border-slate-100 py-1.5 flex justify-between gap-3">
+                <span className="truncate">q={e.query?.q || "—"} · cp={e.query?.code_postal || "—"} · dpt={e.query?.departement || "—"}</span>
+                <span className="shrink-0">Exp: {e.expires_at?.slice(0, 10)} · {e.results_count} rés.</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="card-soft p-6">
           <h2 className="font-bold mb-4">Utilisateurs ({users.length})</h2>
           <div className="overflow-x-auto">
@@ -151,3 +204,25 @@ export default function AdminPage() {
     </div>
   );
 }
+
+const Tile = ({ label, value }) => (
+  <div className="bg-slate-50 rounded-2xl p-3">
+    <div className="text-2xl font-black text-slate-900">{value?.toLocaleString?.("fr-FR") ?? value}</div>
+    <div className="text-xs text-slate-500">{label}</div>
+  </div>
+);
+
+const RankList = ({ title, rows, testid }) => (
+  <div data-testid={testid}>
+    <div className="text-xs font-semibold text-slate-500 mb-1">{title}</div>
+    {rows.length === 0 && <div className="text-xs text-slate-400 italic">Aucune donnée</div>}
+    <ul className="space-y-1 text-sm">
+      {rows.slice(0, 6).map((r, i) => (
+        <li key={i} className="flex justify-between border-b border-slate-100 py-0.5">
+          <span className="truncate max-w-[80%]">{r.label || "—"}</span>
+          <span className="font-bold text-blue-600">{r.n}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+);

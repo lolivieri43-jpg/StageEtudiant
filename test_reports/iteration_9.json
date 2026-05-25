@@ -1,0 +1,48 @@
+{
+  "summary": "Phase C+D+E (Iter9). Backend: 22/22 PASSED — Phase C (/me/companies CRUD + duplicate idempotency + 403 role gating + status filter + invalid-status 400 + patch persistence + CSV/XLSX/PDF exports w/ FR headers + invalid fmt 400 + DELETE + AI spontaneous-message 403 for company / works for candidate). Phase D (/ai/search criteria.city='lyon' extracted + empty query 400 + log inserted; /me/search-history POST/GET/DELETE one/clear all; /me/history-settings persists, POST→{skipped:true} when disabled). Phase E (/admin/api-stats 403 non-admin; 200 admin returns by_api/top_queries/top_departments/top_naf/ai_searches/profile_views/obtained_count/recent_errors). Frontend: ALL critical testids present and functional — /my-companies (status-filters, export-csv/xlsx/pdf, 3 mc-row-* each with mc-status/mc-ai/mc-del/mc-date/mc-note); Message IA modale opens, ai-brief fills, ai-generate → ai-result populated (1083 chars from LLM in ~10s); /companies has ai-search-bar+ai-search-input+ai-search-submit + cs-save-{siret} (12 rows), clicking save creates row in tracking and badge 'Dans ma liste' appears; /offers ai-search-bar visible; /history toggle-history+clear-history visible; Header dropdown has menu-my-companies+menu-my-cv+menu-history. /admin shows admin-api-stats tiles (40 API calls, 7 Cache hits, 2 AI searches, 3 profile views) + top-queries/top-departments/top-naf RankLists + admin-cache with purge-search/purge-all + recent errors list.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/me/history-settings", "issue": "Endpoint persists history_disabled to users collection, but get_current_user must include that field for subsequent POST /me/search-history to short-circuit. Verified: works end-to-end (test_history_disabled_skips passes), but worth ensuring auth dependency always projects history_disabled."},
+      {"endpoint": "GET /api/admin/api-stats", "issue": "obtained_count is computed globally (count of applications in OBTAINED_STATUSES) — not filtered by the days window. Document or scope-by-window for consistency with the 'window_days' label."},
+      {"endpoint": "POST /api/me/companies", "issue": "Idempotency key uses siret if provided, else name. Two different companies with the same plain name (no SIRET) added by the same student would be silently de-duplicated. Consider falling back to (name, city) or (name, postal_code) when siret is absent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/my-companies row", "issues": ["The 'Email contact' input has no data-testid (placeholder-only); fine for now but consider mc-email-{id} for parity with mc-date / mc-note."]},
+      {"screen": "/my-companies date input", "issues": ["Uses native browser <input type='date'> (mm/dd/yyyy). System prompt prefers shadcn Calendar component for date pickers — minor UX inconsistency with the rest of the app."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter8_phaseCDE.py",
+    "/app/test_reports/pytest/pytest_iter9.xml"
+  ],
+  "action_items": [
+    "(OPTIONAL) Add mc-email-{id} data-testid on email input in MyCompaniesPage for testing parity.",
+    "(OPTIONAL) Replace native <input type='date'> on /my-companies with shadcn Calendar/Popover for UX consistency.",
+    "(OPTIONAL) Scope admin-api-stats obtained_count by the days window or rename to 'obtained_total'.",
+    "(OPTIONAL) POST /me/companies idempotency: include city/postal_code in the key when siret is absent."
+  ],
+  "critical_code_review_comments": [
+    "server.py = 3656 lines (was 3345 in Phase B). Phase C+D+E added ~310 lines and pushes the file far beyond the 700-line rule. STRONG recommendation to split into backend/routers/lists.py, ai.py, admin.py and mount under phase_api.",
+    "Phase C exports import openpyxl and reportlab modules INSIDE the handler. For PDF/XLSX exports of small lists this is fine (small overhead), but consider top-level imports if the file is split.",
+    "Phase D /ai/search: criteria parsing uses a greedy regex on the LLM raw output. If the LLM returns JSON with leading prose, parsing still works, but malformed JSON silently becomes {} (no warning logged). Add a logger.warning for visibility.",
+    "Phase D /me/search-history POST returns {ok:true, skipped:true} when history_disabled=True — but other endpoints in this router return inserted-doc structure. Frontend must check 'skipped' before assuming an id is present.",
+    "Phase E /admin/api-stats: aggregations match on $query.q / $query.departement / $query.activite_principale assuming api_request_logs has a sub-document 'query'. Confirm the logger that writes these documents always stores the full querystring under 'query'.",
+    "MyCompaniesPage.jsx: every keystroke in note/email/relance_date inputs fires a PATCH (via onChange → update). On a slow connection this could spam the API. Consider a 500ms debounce before calling update().",
+    "AISearchBar usage relies on call_ai. Loading state during AI extraction does not have a visible skeleton in OffersPage/CompanyDirectoryPage — the bar shows busy text but the page below appears unchanged for up to 10s. Consider a subtle linear loader for clarity."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter8_phaseCDE.py (new, 22 tests, 100% pass)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% on tested critical flows — all required data-testids present, Message IA AI modal generates real LLM message, cs-save → 'Dans ma liste' badge works, admin tiles + 3 RankLists populated, candidate header dropdown shows all 3 expected menu items."},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123! ; hr@brightstudio011.fr/Demo1234! ; lucas.martin@email.fr/Demo1234! (from /app/memory/test_credentials.md). Token field name in /api/auth/login response: 'token'.",
+  "seed_data_creation": "During backend testing TEST_AlphaCorp + TEST_BetaInc + TEST_ToDelete + TEST_HIST + TEST_DEL + TEST_SKIP + TEST_CLEAR entries are created and most are cleaned up by setup_class. Some TEST_AlphaCorp / TEST_BetaInc rows remain in student_company_lists for user lucas.martin (visible in the /my-companies UI screenshot as 3 rows incl. DECATHLON). Recommend a quick manual cleanup or include teardown in the next iteration.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase C/D/E backend tests live at /app/backend/tests/test_iter8_phaseCDE.py — run via `pytest backend/tests/test_iter8_phaseCDE.py -v`. AI tests (/ai/spontaneous-message, /ai/search) hit Emergent LLM (gpt-4o-mini) and cost real tokens; results are non-deterministic — test_ai_search_extracts_city asserts only that 'lyon' (case-insensitive) appears in criteria.city. Frontend tests verified at /my-companies, /companies, /offers, /history, /admin — all data-testids in the review_request are present and functional. lucas.martin has lingering TEST_ entries (Alpha, Beta) and a real Decathlon row in student_company_lists — main agent can leave or purge.",
+  "rca of the issue": "No critical issues found. All Phase C/D/E acceptance criteria from the review_request are met by the backend (22/22 tests pass against the live preview URL) and the frontend (every requested data-testid was found visible, AI message generation completed in ~10s returning a 1083-char French message, cs-save flow added a row with the 'Dans ma liste' badge, admin tiles populated with real metrics). The minor items above are non-blocking enhancements."
+}
