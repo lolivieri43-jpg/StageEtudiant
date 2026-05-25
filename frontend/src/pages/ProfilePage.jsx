@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { CheckCircle2, MapPin, Briefcase, GraduationCap, MessageSquare, UserPlus, Edit2, FileText, Trash2, Image as ImageIcon, X, UserCheck, UserMinus, ShieldOff } from "lucide-react";
+import { CheckCircle2, MapPin, Briefcase, GraduationCap, MessageSquare, UserPlus, Edit2, FileText, Trash2, Image as ImageIcon, X, UserCheck, UserMinus, ShieldOff, FileCheck2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -37,6 +37,7 @@ export default function ProfilePage() {
   const [contactStatus, setContactStatus] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState({});
+  const [hasOnlineCv, setHasOnlineCv] = useState(false);
 
   const isOwn = user && user.user_id === id;
 
@@ -50,6 +51,10 @@ export default function ProfilePage() {
     }
     if (data.role === "candidate") {
       api.get(`/users/${id}/documents`).then((d) => setDocs(d.data)).catch(() => setDocs([]));
+      // Probe CV visibility (404 = no CV, 403 = exists but restricted, 200 = visible)
+      api.get(`/users/${id}/cv`)
+        .then(() => setHasOnlineCv(true))
+        .catch((err) => setHasOnlineCv(err?.response?.status === 403));
     }
     if (user && !isOwn) {
       api.get(`/contacts/status/${id}`).then((c) => setContactStatus(c.data));
@@ -213,9 +218,17 @@ export default function ProfilePage() {
             </div>
             <div className="flex flex-wrap gap-2">
               {isOwn ? (
-                <Button onClick={() => setEditOpen(true)} variant="outline" className="rounded-full" data-testid="edit-profile-btn"><Edit2 className="w-4 h-4 mr-1" />Modifier</Button>
+                <>
+                  <Button onClick={() => setEditOpen(true)} variant="outline" className="rounded-full" data-testid="edit-profile-btn"><Edit2 className="w-4 h-4 mr-1" />Modifier</Button>
+                  {profile.role === "candidate" && (
+                    <Link to="/cv"><Button variant="outline" className="rounded-full" data-testid="my-cv-btn"><FileCheck2 className="w-4 h-4 mr-1" />Mon CV en ligne</Button></Link>
+                  )}
+                </>
               ) : user ? (
                 <>
+                  {profile.role === "candidate" && hasOnlineCv && (
+                    <Link to={`/cv/${id}`}><Button variant="outline" className="rounded-full" data-testid="view-cv-btn"><FileCheck2 className="w-4 h-4 mr-1" />Voir le CV en ligne</Button></Link>
+                  )}
                   {contactStatus?.status === "connected" && <Button onClick={() => navigate(`/messages?user=${id}`)} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="message-btn"><MessageSquare className="w-4 h-4 mr-1" />Message</Button>}
                   {contactStatus?.status === "none" && <Button onClick={requestContact} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="contact-btn"><UserPlus className="w-4 h-4 mr-1" />Ajouter en contact</Button>}
                   {contactStatus?.status === "sent" && <Button onClick={cancelInvite} variant="outline" className="rounded-full" data-testid="cancel-invite-btn">Invitation envoyée</Button>}

@@ -107,6 +107,9 @@ class OfferIn(BaseModel):
 class ApplicationIn(BaseModel):
     offer_id: str
     cover_letter: Optional[str] = None
+    use_online_cv: bool = True
+    online_cv_template: Optional[str] = "modern"
+    uploaded_doc_ids: List[str] = []
 
 class PostIn(BaseModel):
     content: str
@@ -413,6 +416,25 @@ async def apply(data: ApplicationIn, user=Depends(get_current_user)):
     if existing:
         raise HTTPException(400, "Vous avez déjà postulé")
     app_id = f"app_{uuid.uuid4().hex[:12]}"
+    # Snapshot of online CV (if requested) so company always sees the CV as it was at apply time
+    online_cv_snapshot = None
+    if data.use_online_cv:
+        cv_doc = await db.student_cvs.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if cv_doc:
+            online_cv_snapshot = cv_doc
+    # Resolve user's selected uploaded documents
+    selected_docs = []
+    if data.uploaded_doc_ids:
+        docs = await db.student_documents.find(
+            {"user_id": user["user_id"], "doc_id": {"$in": data.uploaded_doc_ids}}, {"_id": 0}
+        ).to_list(20)
+        for d in docs:
+            selected_docs.append({
+                "doc_id": d.get("doc_id"),
+                "file_id": d.get("file_id"),
+                "filename": d.get("filename"),
+                "doc_type": d.get("doc_type", "autre"),
+            })
     doc = {
         "app_id": app_id,
         "offer_id": data.offer_id,
@@ -424,6 +446,10 @@ async def apply(data: ApplicationIn, user=Depends(get_current_user)):
         "candidate_avatar": user.get("profile", {}).get("avatar"),
         "cover_letter": data.cover_letter,
         "cv_url": user.get("profile", {}).get("cv_url"),
+        "use_online_cv": bool(data.use_online_cv and online_cv_snapshot),
+        "online_cv_snapshot": online_cv_snapshot,
+        "online_cv_template": data.online_cv_template or "modern",
+        "selected_documents": selected_docs,
         "status": "envoyee",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -2416,6 +2442,590 @@ class FranceTravailRealConnector(ExternalConnector):
 
 # Replace the stub with the real connector
 CONNECTORS["FranceTravail"] = FranceTravailRealConnector()
+
+
+
+# ============ ITERATION 6: CV EN LIGNE + PDF EXPORT + AI ============
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.lib import colors as rl_colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.enums import TA_LEFT
+
+DEFAULT_CV = {
+    "professional_title": "",
+    "summary": "",
+    "availability_date": "",
+    "search_status": "en_recherche",
+    "contract_type_searched": "stage",
+    "mobility": "",
+    "phone_visible": True,
+    "email_visible": True,
+    "visibility": "connected",  # public, connected, after_application, private
+    "pdf_template": "modern",  # default template for PDF export (modern, classique, etudiant, alternance, professionnel)
+    "educations": [],
+    "experiences": [],
+    "skills": [],
+    "languages": [],
+    "projects": [],
+    "certifications": [],
+    "updated_at": None,
+}
+
+@api.get("/cv")
+async def get_my_cv(user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    cv = await db.student_cvs.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not cv:
+        cv = {"user_id": user["user_id"], **DEFAULT_CV}
+        await db.student_cvs.insert_one(cv)
+        cv.pop("_id", None)
+    return cv
+
+@api.put("/cv")
+async def update_my_cv(data: dict, user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    allowed_fields = set(DEFAULT_CV.keys())
+    safe = {k: v for k, v in data.items() if k in allowed_fields}
+    safe["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.student_cvs.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": safe, "$setOnInsert": {"user_id": user["user_id"]}},
+        upsert=True,
+    )
+    cv = await db.student_cvs.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return cv
+
+def can_view_cv(cv: dict, viewer: Optional[dict], owner_id: str) -> bool:
+    if viewer and viewer["user_id"] == owner_id:
+        return True
+    visibility = cv.get("visibility", "connected")
+    if visibility == "public":
+        return True
+    if visibility == "private":
+        return False
+    if not viewer:
+        return False
+    return True  # connected/after_application: simpler check at API caller side
+
+@api.get("/users/{user_id}/cv")
+async def get_user_cv(user_id: str, requester=Depends(get_optional_user)):
+    cv = await db.student_cvs.find_one({"user_id": user_id}, {"_id": 0})
+    if not cv:
+        raise HTTPException(404, "Pas de CV en ligne")
+    visibility = cv.get("visibility", "connected")
+    is_owner = requester and requester["user_id"] == user_id
+    if is_owner:
+        return cv
+    if visibility == "public":
+        return cv
+    if visibility == "private":
+        raise HTTPException(403, "CV privé")
+    if not requester:
+        raise HTTPException(401, "Authentification requise")
+    if visibility == "connected":
+        ct = await db.contacts.find_one({"$or": [
+            {"user_a": user_id, "user_b": requester["user_id"]},
+            {"user_a": requester["user_id"], "user_b": user_id},
+        ]})
+        if not ct:
+            raise HTTPException(403, "CV réservé aux contacts")
+    elif visibility == "after_application":
+        ap = await db.applications.find_one({"candidate_id": user_id, "company_id": requester["user_id"]})
+        if not ap:
+            raise HTTPException(403, "CV accessible après candidature")
+    return cv
+
+# ============ PDF EXPORT ============
+def _cv_color_palette(template: str):
+    """Returns (accent, secondary, text, muted) HexColors for the given template."""
+    palettes = {
+        "modern":        ("#2563EB", "#DBEAFE", "#0F172A", "#64748B"),
+        "classique":     ("#0F172A", "#E2E8F0", "#111827", "#475569"),
+        "etudiant":      ("#10B981", "#D1FAE5", "#064E3B", "#475569"),
+        "alternance":    ("#8B5CF6", "#EDE9FE", "#1E1B4B", "#6B7280"),
+        "professionnel": ("#1E40AF", "#1E293B", "#FFFFFF", "#94A3B8"),
+    }
+    accent, secondary, text, muted = palettes.get(template, palettes["modern"])
+    return rl_colors.HexColor(accent), rl_colors.HexColor(secondary), rl_colors.HexColor(text), rl_colors.HexColor(muted)
+
+
+def _hex(c):
+    """ReportLab HexColor → '#rrggbb' for inline HTML."""
+    return "#" + c.hexval()[2:]
+
+
+def _build_sidebar_blocks(cv: dict, body, item_sub, accent, secondary, dark_bg=False):
+    """Build right-sidebar content for two-column templates."""
+    blocks = []
+    sec_title = ParagraphStyle("sbTitle", fontSize=11, fontName="Helvetica-Bold",
+                               textColor=accent, spaceBefore=10, spaceAfter=4, leading=14)
+    if dark_bg:
+        sec_title.textColor = rl_colors.white
+        body = ParagraphStyle("sbBody", parent=body, textColor=rl_colors.HexColor("#E2E8F0"))
+        item_sub = ParagraphStyle("sbSub", parent=item_sub, textColor=rl_colors.HexColor("#CBD5E1"))
+
+    if cv.get("skills"):
+        blocks.append(Paragraph("COMPÉTENCES", sec_title))
+        for s in cv["skills"]:
+            blocks.append(Paragraph(f"• {s}", body))
+    if cv.get("languages"):
+        blocks.append(Paragraph("LANGUES", sec_title))
+        for lang in cv["languages"]:
+            blocks.append(Paragraph(f"• {lang.get('language','')} — {lang.get('level','')}", body))
+    if cv.get("certifications"):
+        blocks.append(Paragraph("CERTIFICATIONS", sec_title))
+        for c in cv["certifications"]:
+            blocks.append(Paragraph(c.get("name",""), body))
+            if c.get("issuer") or c.get("date"):
+                blocks.append(Paragraph(f"{c.get('issuer','')} · {c.get('date','')}", item_sub))
+    return blocks
+
+
+def build_cv_pdf(user: dict, cv: dict, template: str = "modern") -> bytes:
+    template = template if template in {"modern", "classique", "etudiant", "alternance", "professionnel"} else "modern"
+    buf = io.BytesIO()
+    accent, secondary, text_color, muted = _cv_color_palette(template)
+    p = user.get("profile", {})
+
+    contact_bits = []
+    if cv.get("email_visible", True): contact_bits.append(user.get("email", ""))
+    if cv.get("phone_visible", True) and p.get("mobile"): contact_bits.append(p["mobile"])
+    if p.get("city"): contact_bits.append(p["city"])
+    if cv.get("mobility"): contact_bits.append(f"Mobilité: {cv['mobility']}")
+
+    # --- Build common styles ---
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=10, leading=14,
+                          spaceAfter=6, textColor=text_color)
+    item_title = ParagraphStyle("itemTitle", parent=styles["Normal"], fontSize=11,
+                                fontName="Helvetica-Bold", spaceAfter=1, textColor=text_color)
+    item_sub = ParagraphStyle("itemSub", parent=styles["Normal"], fontSize=9,
+                              textColor=muted, spaceAfter=4)
+
+    elements = []
+
+    # ===== TEMPLATE: CLASSIQUE — serif, centered name, sober =====
+    if template == "classique":
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2.2*cm, rightMargin=2.2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+        name_style = ParagraphStyle("name", parent=styles["Title"], fontName="Times-Bold",
+                                    fontSize=24, alignment=1, textColor=text_color, spaceAfter=2)
+        sub = ParagraphStyle("sub", parent=styles["Normal"], fontName="Times-Italic",
+                             fontSize=12, alignment=1, textColor=muted, spaceAfter=8)
+        section_style = ParagraphStyle("section", parent=styles["Heading2"], fontName="Times-Bold",
+                                       fontSize=12, textColor=text_color, alignment=0,
+                                       borderPadding=4, spaceBefore=14, spaceAfter=6)
+        body = ParagraphStyle("body", parent=body, fontName="Times-Roman")
+        item_title = ParagraphStyle("itemTitle", parent=item_title, fontName="Times-Bold")
+        elements.append(Paragraph(user.get("name", ""), name_style))
+        if cv.get("professional_title"):
+            elements.append(Paragraph(cv["professional_title"], sub))
+        if contact_bits:
+            elements.append(Paragraph(" · ".join(contact_bits), ParagraphStyle("ctc", parent=item_sub, alignment=1)))
+        # Decorative divider
+        from reportlab.platypus import HRFlowable
+        elements.append(HRFlowable(width="60%", thickness=0.7, lineCap="round",
+                                   color=accent, spaceBefore=4, spaceAfter=8, hAlign="CENTER"))
+        sections = [
+            ("Profil", lambda: [Paragraph(cv["summary"], body)] if cv.get("summary") else []),
+            ("Expériences", lambda: _exp_block(cv, item_title, item_sub, body)),
+            ("Formation", lambda: _edu_block(cv, item_title, item_sub, body)),
+            ("Compétences", lambda: [Paragraph(" · ".join(cv["skills"]), body)] if cv.get("skills") else []),
+            ("Langues", lambda: _lang_block(cv, body)),
+            ("Projets", lambda: _proj_block(cv, item_title, item_sub, body)),
+            ("Certifications", lambda: _cert_block(cv, item_title, item_sub)),
+        ]
+        for title_, fn in sections:
+            blocks = fn()
+            if blocks:
+                elements.append(Paragraph(title_.upper(), section_style))
+                elements.extend(blocks)
+        doc.build(elements)
+        return buf.getvalue()
+
+    # ===== TEMPLATE: ETUDIANT — friendly, larger color blocks =====
+    if template == "etudiant":
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.8*cm, rightMargin=1.8*cm,
+                                topMargin=1.5*cm, bottomMargin=1.8*cm)
+        # Coloured banner table with name
+        from reportlab.platypus import Table, TableStyle
+        banner_inner = [
+            Paragraph(f'<font color="white" size="22"><b>{user.get("name","")}</b></font>', styles["Normal"]),
+            Paragraph(f'<font color="white" size="12">{cv.get("professional_title","")}</font>', styles["Normal"]),
+            Paragraph(f'<font color="#E0F2FE" size="9">{" · ".join(contact_bits)}</font>', styles["Normal"]),
+        ]
+        banner = Table([[banner_inner]], colWidths=[doc.width])
+        banner.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), accent),
+            ("LEFTPADDING", (0,0), (-1,-1), 14),
+            ("RIGHTPADDING", (0,0), (-1,-1), 14),
+            ("TOPPADDING", (0,0), (-1,-1), 14),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 14),
+            ("ROUNDEDCORNERS", [10,10,10,10]),
+        ]))
+        elements.append(banner)
+        elements.append(Spacer(1, 12))
+        section_style = ParagraphStyle("section", parent=styles["Heading2"], fontSize=13,
+                                       fontName="Helvetica-Bold", textColor=accent,
+                                       spaceBefore=14, spaceAfter=4)
+        if cv.get("summary"):
+            elements.append(Paragraph("À propos de moi", section_style))
+            elements.append(Paragraph(cv["summary"], body))
+        if cv.get("educations"):
+            elements.append(Paragraph("🎓 Formation", section_style))
+            elements.extend(_edu_block(cv, item_title, item_sub, body))
+        if cv.get("experiences"):
+            elements.append(Paragraph("💼 Expériences", section_style))
+            elements.extend(_exp_block(cv, item_title, item_sub, body))
+        if cv.get("skills"):
+            elements.append(Paragraph("⚡ Compétences", section_style))
+            # Skill chips as Paragraphs
+            chips = " ".join([f'<font color="white" backColor="{_hex(accent)}"> {s} </font>' for s in cv["skills"]])
+            elements.append(Paragraph(chips, body))
+        if cv.get("languages"):
+            elements.append(Paragraph("🌐 Langues", section_style))
+            elements.extend(_lang_block(cv, body))
+        if cv.get("projects"):
+            elements.append(Paragraph("🚀 Projets", section_style))
+            elements.extend(_proj_block(cv, item_title, item_sub, body))
+        if cv.get("certifications"):
+            elements.append(Paragraph("🏆 Certifications", section_style))
+            elements.extend(_cert_block(cv, item_title, item_sub))
+        doc.build(elements)
+        return buf.getvalue()
+
+    # ===== TEMPLATE: ALTERNANCE — two-column, violet, formation + experience focused =====
+    if template == "alternance":
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm,
+                                topMargin=1.5*cm, bottomMargin=1.5*cm)
+        name_style = ParagraphStyle("name", parent=styles["Title"], fontSize=20,
+                                    textColor=accent, spaceAfter=2)
+        title_style = ParagraphStyle("title", parent=styles["Normal"], fontSize=12,
+                                     textColor=muted, spaceAfter=8)
+        section_style = ParagraphStyle("section", parent=styles["Heading2"], fontSize=11,
+                                       fontName="Helvetica-Bold", textColor=accent,
+                                       spaceBefore=10, spaceAfter=4)
+        # Header banner
+        elements.append(Paragraph(user.get("name", ""), name_style))
+        if cv.get("professional_title"):
+            elements.append(Paragraph(cv["professional_title"] + "  ·  <b>Recherche alternance</b>", title_style))
+        if contact_bits:
+            elements.append(Paragraph(" · ".join(contact_bits), item_sub))
+        from reportlab.platypus import HRFlowable
+        elements.append(HRFlowable(width="100%", thickness=1.5, color=accent, spaceBefore=6, spaceAfter=8))
+        if cv.get("summary"):
+            elements.append(Paragraph("PROJET PROFESSIONNEL", section_style))
+            elements.append(Paragraph(cv["summary"], body))
+
+        # 2-column: Left (Experiences + Projects), Right (Formation + Skills + Languages + Certifications)
+        left = []
+        if cv.get("experiences"):
+            left.append(Paragraph("EXPÉRIENCES & STAGES", section_style))
+            left.extend(_exp_block(cv, item_title, item_sub, body))
+        if cv.get("projects"):
+            left.append(Paragraph("PROJETS", section_style))
+            left.extend(_proj_block(cv, item_title, item_sub, body))
+        right = []
+        if cv.get("educations"):
+            right.append(Paragraph("FORMATION", section_style))
+            right.extend(_edu_block(cv, item_title, item_sub, body))
+        right.extend(_build_sidebar_blocks(cv, body, item_sub, accent, secondary))
+        from reportlab.platypus import Table, TableStyle
+        col_w = (doc.width - 0.5*cm) / 2
+        cols = Table([[left, right]], colWidths=[col_w, col_w])
+        cols.setStyle(TableStyle([
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING", (0,0), (-1,-1), 0),
+            ("RIGHTPADDING", (0,0), (-1,-1), 8),
+        ]))
+        elements.append(cols)
+        doc.build(elements)
+        return buf.getvalue()
+
+    # ===== TEMPLATE: PROFESSIONNEL — dark sidebar, formal =====
+    if template == "professionnel":
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=0*cm, rightMargin=0*cm,
+                                topMargin=0*cm, bottomMargin=0*cm)
+        # build main + sidebar columns
+        sb_title_color = rl_colors.white
+        main_body = ParagraphStyle("mainBody", fontSize=10, leading=14, spaceAfter=6,
+                                   textColor=rl_colors.HexColor("#0F172A"))
+        main_section = ParagraphStyle("mainSection", fontSize=11, fontName="Helvetica-Bold",
+                                      textColor=accent, spaceBefore=12, spaceAfter=4)
+        main_item_title = ParagraphStyle("mit", fontSize=11, fontName="Helvetica-Bold",
+                                         textColor=rl_colors.HexColor("#0F172A"), spaceAfter=1)
+        main_item_sub = ParagraphStyle("mis", fontSize=9, textColor=rl_colors.HexColor("#475569"), spaceAfter=4)
+        main_col = []
+        main_col.append(Paragraph(f'<font size="22" color="{_hex(accent)}"><b>{user.get("name","")}</b></font>', main_body))
+        if cv.get("professional_title"):
+            main_col.append(Paragraph(f'<font size="13" color="#475569">{cv["professional_title"]}</font>', main_body))
+        main_col.append(Spacer(1, 8))
+        if cv.get("summary"):
+            main_col.append(Paragraph("PROFIL", main_section))
+            main_col.append(Paragraph(cv["summary"], main_body))
+        if cv.get("experiences"):
+            main_col.append(Paragraph("EXPÉRIENCE PROFESSIONNELLE", main_section))
+            main_col.extend(_exp_block(cv, main_item_title, main_item_sub, main_body))
+        if cv.get("educations"):
+            main_col.append(Paragraph("FORMATION", main_section))
+            main_col.extend(_edu_block(cv, main_item_title, main_item_sub, main_body))
+        if cv.get("projects"):
+            main_col.append(Paragraph("PROJETS", main_section))
+            main_col.extend(_proj_block(cv, main_item_title, main_item_sub, main_body))
+
+        sb_body = ParagraphStyle("sbBody", fontSize=10, leading=14, spaceAfter=4,
+                                 textColor=rl_colors.HexColor("#E2E8F0"))
+        sb_section = ParagraphStyle("sbSec", fontSize=11, fontName="Helvetica-Bold",
+                                    textColor=rl_colors.white, spaceBefore=12, spaceAfter=4)
+        sb_sub = ParagraphStyle("sbSub", fontSize=9, textColor=rl_colors.HexColor("#94A3B8"), spaceAfter=4)
+        sidebar = []
+        sidebar.append(Paragraph("CONTACT", sb_section))
+        for b in contact_bits:
+            sidebar.append(Paragraph(b, sb_body))
+        if cv.get("skills"):
+            sidebar.append(Paragraph("COMPÉTENCES", sb_section))
+            for s in cv["skills"]:
+                sidebar.append(Paragraph(f"• {s}", sb_body))
+        if cv.get("languages"):
+            sidebar.append(Paragraph("LANGUES", sb_section))
+            for lang in cv["languages"]:
+                sidebar.append(Paragraph(f"• {lang.get('language','')} — {lang.get('level','')}", sb_body))
+        if cv.get("certifications"):
+            sidebar.append(Paragraph("CERTIFICATIONS", sb_section))
+            for c in cv["certifications"]:
+                sidebar.append(Paragraph(c.get("name",""), sb_body))
+                if c.get("issuer") or c.get("date"):
+                    sidebar.append(Paragraph(f"{c.get('issuer','')} · {c.get('date','')}", sb_sub))
+        from reportlab.platypus import Table, TableStyle
+        page_w = A4[0]
+        sb_w = 6.2*cm
+        main_w = page_w - sb_w
+        layout = Table([[main_col, sidebar]], colWidths=[main_w, sb_w])
+        layout.setStyle(TableStyle([
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("BACKGROUND", (1,0), (1,-1), rl_colors.HexColor("#1E293B")),
+            ("LEFTPADDING", (0,0), (0,0), 24),
+            ("RIGHTPADDING", (0,0), (0,0), 18),
+            ("TOPPADDING", (0,0), (0,0), 26),
+            ("BOTTOMPADDING", (0,0), (0,0), 26),
+            ("LEFTPADDING", (1,0), (1,0), 16),
+            ("RIGHTPADDING", (1,0), (1,0), 16),
+            ("TOPPADDING", (1,0), (1,0), 26),
+            ("BOTTOMPADDING", (1,0), (1,0), 26),
+        ]))
+        # Force full page height for sidebar background
+        elements.append(layout)
+        doc.build(elements)
+        return buf.getvalue()
+
+    # ===== TEMPLATE: MODERN (default) — clean single column, blue accent =====
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+    name_style = ParagraphStyle("name", parent=styles["Title"], fontSize=22,
+                                textColor=accent, alignment=TA_LEFT, spaceAfter=4)
+    title_style = ParagraphStyle("title", parent=styles["Normal"], fontSize=13,
+                                 textColor=muted, spaceAfter=12)
+    section_style = ParagraphStyle("section", parent=styles["Heading2"], fontSize=12,
+                                   textColor=accent, spaceBefore=14, spaceAfter=4)
+    elements.append(Paragraph(user.get("name", ""), name_style))
+    if cv.get("professional_title"):
+        elements.append(Paragraph(cv["professional_title"], title_style))
+    if contact_bits:
+        elements.append(Paragraph(" · ".join(contact_bits), item_sub))
+    if cv.get("summary"):
+        elements.append(Paragraph("Profil", section_style))
+        elements.append(Paragraph(cv["summary"], body))
+    if cv.get("experiences"):
+        elements.append(Paragraph("Expériences professionnelles", section_style))
+        elements.extend(_exp_block(cv, item_title, item_sub, body))
+    if cv.get("educations"):
+        elements.append(Paragraph("Formation", section_style))
+        elements.extend(_edu_block(cv, item_title, item_sub, body))
+    if cv.get("skills"):
+        elements.append(Paragraph("Compétences", section_style))
+        elements.append(Paragraph(" · ".join(cv["skills"]), body))
+    if cv.get("languages"):
+        elements.append(Paragraph("Langues", section_style))
+        elements.extend(_lang_block(cv, body))
+    if cv.get("projects"):
+        elements.append(Paragraph("Projets", section_style))
+        elements.extend(_proj_block(cv, item_title, item_sub, body))
+    if cv.get("certifications"):
+        elements.append(Paragraph("Certifications", section_style))
+        elements.extend(_cert_block(cv, item_title, item_sub))
+    doc.build(elements)
+    return buf.getvalue()
+
+
+def _exp_block(cv, item_title, item_sub, body):
+    out = []
+    for e in cv.get("experiences", []):
+        out.append(Paragraph(f"{e.get('job_title','')} — {e.get('company_name','')}", item_title))
+        sub = " · ".join(filter(None, [e.get("city",""),
+                                       f"{e.get('start_date','')} → {e.get('end_date','') or 'En cours'}",
+                                       e.get("experience_type","")]))
+        if sub: out.append(Paragraph(sub, item_sub))
+        if e.get("description"): out.append(Paragraph(e["description"], body))
+    return out
+
+def _edu_block(cv, item_title, item_sub, body):
+    out = []
+    for ed in cv.get("educations", []):
+        out.append(Paragraph(f"{ed.get('degree','')} — {ed.get('school','')}", item_title))
+        sub = " · ".join(filter(None, [ed.get("city",""),
+                                       f"{ed.get('start_date','')} → {ed.get('end_date','')}",
+                                       ed.get("level","")]))
+        if sub: out.append(Paragraph(sub, item_sub))
+        if ed.get("description"): out.append(Paragraph(ed["description"], body))
+    return out
+
+def _lang_block(cv, body):
+    return [Paragraph(f"{l.get('language','')} — {l.get('level','')}", body)
+            for l in cv.get("languages", [])]
+
+def _proj_block(cv, item_title, item_sub, body):
+    out = []
+    for pr in cv.get("projects", []):
+        out.append(Paragraph(pr.get("name",""), item_title))
+        if pr.get("description"): out.append(Paragraph(pr["description"], body))
+        if pr.get("link"): out.append(Paragraph(pr["link"], item_sub))
+    return out
+
+def _cert_block(cv, item_title, item_sub):
+    out = []
+    for c in cv.get("certifications", []):
+        out.append(Paragraph(f"{c.get('name','')} — {c.get('issuer','')}", item_title))
+        if c.get("date"): out.append(Paragraph(c["date"], item_sub))
+    return out
+
+@api.get("/cv/export")
+async def export_my_cv(template: str = "modern", user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    cv = await db.student_cvs.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not cv:
+        raise HTTPException(404, "Pas de CV à exporter")
+    pdf_bytes = build_cv_pdf(user, cv, template)
+    # Log export
+    await db.cv_exports.insert_one({
+        "export_id": f"cve_{uuid.uuid4().hex[:10]}",
+        "user_id": user["user_id"], "template": template,
+        "size": len(pdf_bytes),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return FResponse(content=pdf_bytes, media_type="application/pdf",
+                     headers={"Content-Disposition": f'inline; filename="CV-{user["name"].replace(" ","_")}.pdf"'})
+
+@api.get("/users/{user_id}/cv/export")
+async def export_user_cv(user_id: str, template: str = "modern", requester=Depends(get_current_user)):
+    cv = await db.student_cvs.find_one({"user_id": user_id}, {"_id": 0})
+    if not cv:
+        raise HTTPException(404, "Pas de CV en ligne")
+    visibility = cv.get("visibility", "connected")
+    if visibility == "public" or requester["user_id"] == user_id or requester["role"] == "admin":
+        pass
+    elif visibility == "connected":
+        ct = await db.contacts.find_one({"$or": [
+            {"user_a": user_id, "user_b": requester["user_id"]},
+            {"user_a": requester["user_id"], "user_b": user_id},
+        ]})
+        if not ct: raise HTTPException(403, "Réservé aux contacts")
+    elif visibility == "after_application":
+        ap = await db.applications.find_one({"candidate_id": user_id, "company_id": requester["user_id"]})
+        if not ap: raise HTTPException(403, "Accessible après candidature")
+    else:
+        raise HTTPException(403, "CV privé")
+    owner = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password": 0})
+    pdf_bytes = build_cv_pdf(owner, cv, template)
+    return FResponse(content=pdf_bytes, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="CV-{owner["name"].replace(" ","_")}.pdf"'})
+
+
+@api.get("/applications/{app_id}/cv")
+async def get_application_cv(app_id: str, user=Depends(get_current_user)):
+    """Returns the snapshot of the online CV attached to an application (company + candidate access)."""
+    a = await db.applications.find_one({"app_id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Candidature introuvable")
+    if user["user_id"] not in (a["candidate_id"], a["company_id"]) and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    if not a.get("use_online_cv") or not a.get("online_cv_snapshot"):
+        raise HTTPException(404, "Pas de CV en ligne joint à cette candidature")
+    candidate = await db.users.find_one({"user_id": a["candidate_id"]}, {"_id": 0, "password": 0})
+    return {
+        "cv": a["online_cv_snapshot"],
+        "candidate": candidate,
+        "template": a.get("online_cv_template", "modern"),
+    }
+
+
+@api.get("/applications/{app_id}/cv/export")
+async def export_application_cv(app_id: str, template: Optional[str] = None, user=Depends(get_current_user)):
+    """Exports the snapshot CV attached to an application as a PDF."""
+    a = await db.applications.find_one({"app_id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Candidature introuvable")
+    if user["user_id"] not in (a["candidate_id"], a["company_id"]) and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    if not a.get("use_online_cv") or not a.get("online_cv_snapshot"):
+        raise HTTPException(404, "Pas de CV en ligne joint à cette candidature")
+    owner = await db.users.find_one({"user_id": a["candidate_id"]}, {"_id": 0, "password": 0})
+    tpl = template or a.get("online_cv_template") or "modern"
+    pdf_bytes = build_cv_pdf(owner, a["online_cv_snapshot"], tpl)
+    return FResponse(content=pdf_bytes, media_type="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="CV-{owner["name"].replace(" ","_")}.pdf"'})
+
+# ============ AI ASSISTANT ============
+from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+async def call_ai(system_prompt: str, user_prompt: str, model: str = "gpt-4o-mini") -> str:
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(503, "Service IA indisponible (clé manquante)")
+    session_id = f"cv_{uuid.uuid4().hex[:8]}"
+    chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_prompt).with_model("openai", model)
+    msg = UserMessage(text=user_prompt)
+    return await chat.send_message(msg)
+
+@api.post("/cv/ai/{action}")
+async def cv_ai(action: str, body: dict, user=Depends(get_current_user)):
+    if user["role"] != "candidate":
+        raise HTTPException(403, "Étudiants uniquement")
+    text = body.get("text", "").strip()
+    context = body.get("context", "")
+    if action == "improve":
+        sys = "Tu es un coach carrière. Améliore le texte fourni en restant fidèle au fond mais en le rendant plus impactant, structuré et professionnel. Réponds UNIQUEMENT avec le texte amélioré, sans préambule."
+        prompt = text
+    elif action == "rephrase":
+        sys = "Reformule le texte fourni de manière plus claire et professionnelle. Réponds UNIQUEMENT avec la reformulation."
+        prompt = text
+    elif action == "correct":
+        sys = "Corrige les fautes d'orthographe et de grammaire du texte. Garde le sens identique. Réponds UNIQUEMENT avec le texte corrigé."
+        prompt = text
+    elif action == "summary":
+        sys = "Génère un résumé professionnel de 3-4 phrases pour un CV étudiant, basé sur les infos fournies. Ton positif, dynamique. Réponds UNIQUEMENT avec le résumé."
+        prompt = f"Profil: {text}\nContexte: {context}"
+    elif action == "skills":
+        sys = "Propose 8 à 12 compétences professionnelles pertinentes pour le profil décrit. Réponds UNIQUEMENT avec une liste séparée par des virgules, sans numérotation."
+        prompt = f"Profil: {text}\nDomaine: {context}"
+    elif action == "cover_letter":
+        sys = "Tu rédiges une lettre de motivation professionnelle en français pour un étudiant français cherchant un stage ou une alternance. Ton: respectueux, motivé, concis (250 mots max)."
+        prompt = f"Profil du candidat: {text}\nOffre / entreprise visée: {context}"
+    elif action == "adapt":
+        sys = "Adapte le texte du CV à l'offre fournie en mettant en avant les compétences pertinentes. Réponds UNIQUEMENT avec le texte adapté."
+        prompt = f"Texte original: {text}\nOffre visée: {context}"
+    else:
+        raise HTTPException(400, f"Action IA inconnue: {action}")
+    try:
+        result = await call_ai(sys, prompt)
+    except Exception as e:
+        logger.error(f"AI error: {e}")
+        raise HTTPException(500, "Erreur IA. Réessayez.")
+    return {"suggestion": result}
 
 
 

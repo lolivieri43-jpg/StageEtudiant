@@ -33,6 +33,7 @@ import AdminMonetizationPage from "./pages/AdminMonetizationPage";
 import SearchStudentsPage from "./pages/SearchStudentsPage";
 import ApplicationDetailPage from "./pages/ApplicationDetailPage";
 import SavedOffersPage from "./pages/SavedOffersPage";
+import CVPage from "./pages/CVPage";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -76,6 +77,8 @@ function AppRouter() {
         <Route path="/search/students" element={<Protected><SearchStudentsPage /></Protected>} />
         <Route path="/applications/:id" element={<Protected><ApplicationDetailPage /></Protected>} />
         <Route path="/saved-offers" element={<Protected><SavedOffersPage /></Protected>} />
+        <Route path="/cv" element={<Protected><CVPage /></Protected>} />
+        <Route path="/cv/:id" element={<CVPage />} />
       </Routes>
     </>
   );

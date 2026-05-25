@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
-import { Download, MessageSquare, User, CheckCircle2, XCircle, Calendar, Archive, FileText } from "lucide-react";
+import { Download, MessageSquare, User, CheckCircle2, XCircle, Calendar, Archive, FileText, FileCheck2, Eye } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_LABELS = {
@@ -42,6 +42,20 @@ export default function ApplicationDetailPage() {
   const isCompany = user?.user_id === a.company_id;
   const isCandidate = user?.user_id === a.candidate_id;
 
+  const downloadOnlineCvPdf = async () => {
+    try {
+      const tpl = a.online_cv_template || "modern";
+      const resp = await api.get(`/applications/${id}/cv/export?template=${tpl}`, { responseType: "blob" });
+      const blob = new Blob([resp.data], { type: "application/pdf" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `CV-${candidate?.name?.replace(/\s/g, "_") || "candidat"}.pdf`;
+      link.click();
+    } catch {
+      toast.error("Export PDF impossible");
+    }
+  };
+
   const setStatus = async (status) => {
     await api.patch(`/applications/${id}/status`, { status });
     toast.success(`Statut: ${STATUS_LABELS[status]}`);
@@ -76,9 +90,46 @@ export default function ApplicationDetailPage() {
               <p className="text-slate-700 whitespace-pre-wrap">{a.cover_letter || <em className="text-slate-400">Aucun message</em>}</p>
             </div>
 
+            {isCompany && a.use_online_cv && a.online_cv_snapshot && (
+              <div className="card-soft p-6" data-testid="online-cv-block">
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <h2 className="font-bold text-slate-900 flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-blue-500" />CV en ligne du candidat</h2>
+                  <div className="flex gap-2">
+                    <Button onClick={downloadOnlineCvPdf} variant="outline" size="sm" className="rounded-full" data-testid="download-online-cv">
+                      <Download className="w-3.5 h-3.5 mr-1" />Télécharger PDF
+                    </Button>
+                    <Link to={`/cv/${a.candidate_id}`}>
+                      <Button variant="outline" size="sm" className="rounded-full" data-testid="view-cv-fullpage"><Eye className="w-3.5 h-3.5 mr-1" />Plein écran</Button>
+                    </Link>
+                  </div>
+                </div>
+                <OnlineCvPreview cv={a.online_cv_snapshot} />
+              </div>
+            )}
+
+            {isCompany && (a.selected_documents?.length > 0) && (
+              <div className="card-soft p-6">
+                <h2 className="font-bold text-slate-900 mb-4">Documents joints à la candidature</h2>
+                <div className="space-y-2">
+                  {a.selected_documents.map(d => (
+                    <a key={d.doc_id} href={`/api/files/${d.file_id}`} target="_blank" rel="noopener" className="flex items-center justify-between bg-slate-50 hover:bg-slate-100 rounded-xl p-3 transition" data-testid={`sel-doc-${d.doc_id}`}>
+                      <div className="flex items-center gap-3">
+                        <FileText className="w-5 h-5 text-blue-500" />
+                        <div>
+                          <div className="font-semibold text-slate-900 text-sm">{d.filename}</div>
+                          <div className="text-xs text-slate-400">{d.doc_type}</div>
+                        </div>
+                      </div>
+                      <Download className="w-4 h-4 text-slate-400" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {isCompany && documents && documents.length > 0 && (
               <div className="card-soft p-6">
-                <h2 className="font-bold text-slate-900 mb-4">Documents joints</h2>
+                <h2 className="font-bold text-slate-900 mb-4">Autres documents publics du candidat</h2>
                 <div className="space-y-2">
                   {documents.map(d => (
                     <a key={d.doc_id} href={`/api/files/${d.file_id}`} target="_blank" rel="noopener" className="flex items-center justify-between bg-slate-50 hover:bg-slate-100 rounded-xl p-3 transition" data-testid={`doc-${d.doc_id}`}>
@@ -154,3 +205,65 @@ export default function ApplicationDetailPage() {
 const Row = ({ label, value }) => (
   <div className="flex justify-between gap-2"><span className="text-slate-400">{label}</span><span className="font-semibold text-slate-700 text-right">{value}</span></div>
 );
+
+function OnlineCvPreview({ cv }) {
+  if (!cv) return null;
+  return (
+    <div className="space-y-4 text-sm" data-testid="online-cv-preview">
+      {cv.professional_title && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Titre</div>
+          <div className="font-bold text-slate-900">{cv.professional_title}</div>
+        </div>
+      )}
+      {cv.summary && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Profil</div>
+          <p className="text-slate-700 whitespace-pre-wrap">{cv.summary}</p>
+        </div>
+      )}
+      {(cv.experiences || []).length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Expériences</div>
+          <ul className="space-y-2">
+            {cv.experiences.map((e, i) => (
+              <li key={i} className="border-l-2 border-blue-200 pl-3">
+                <div className="font-semibold text-slate-900">{e.job_title} — {e.company_name}</div>
+                <div className="text-xs text-slate-500">{e.city} · {e.start_date} → {e.end_date || "En cours"} · {e.experience_type}</div>
+                {e.description && <div className="text-slate-700 mt-0.5 whitespace-pre-wrap">{e.description}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {(cv.educations || []).length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Formation</div>
+          <ul className="space-y-2">
+            {cv.educations.map((e, i) => (
+              <li key={i} className="border-l-2 border-violet-200 pl-3">
+                <div className="font-semibold text-slate-900">{e.degree} — {e.school}</div>
+                <div className="text-xs text-slate-500">{e.city} · {e.start_date} → {e.end_date}</div>
+                {e.description && <div className="text-slate-700">{e.description}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {(cv.skills || []).length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Compétences</div>
+          <div className="flex flex-wrap gap-1.5">
+            {cv.skills.map((s, i) => <span key={i} className="rounded-full bg-violet-50 text-violet-700 text-xs px-2.5 py-0.5">{s}</span>)}
+          </div>
+        </div>
+      )}
+      {(cv.languages || []).length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Langues</div>
+          <div className="text-slate-700">{cv.languages.map(l => `${l.language} (${l.level})`).join(" · ")}</div>
+        </div>
+      )}
+    </div>
+  );
+}

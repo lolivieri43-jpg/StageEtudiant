@@ -1,0 +1,47 @@
+{
+  "summary": "Iter6 testing — Online CV integration with applications + 5 PDF templates + company-side view. Backend: 21/22 passed (1 skipped, no second offer owned by brightstudio011). Frontend: all 5 CV page templates listed; apply modal data-testids OK (apply-use-online-cv, apply-cv-template, cover-letter, submit-application); 'Candidature envoyée !' toast shown; company-side /applications/{id} shows online-cv-block + download-online-cv + view-cv-fullpage with full CV preview (title, summary, experiences, formation, skill chips, languages); /profile/{candidate_id} shows view-cv-btn; /cv/{candidate_id} renders in read-only mode for company (zero editable inputs, Télécharger PDF works).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/cv/export?template=modern|classique", "issue": "If cv.skills is stored as a list of dicts (e.g. [{name,level}]), server.py:2637 (modern) and server.py:2850 (classique) crash with TypeError: sequence item 0: expected str instance, dict found → 500. The frontend currently stores skills as strings, but there is NO Pydantic validation on PUT /api/cv (accepts raw dict), so any API consumer (or a future frontend refactor) can wedge PDF export. Defensive fix: coerce each skill via `(s if isinstance(s,str) else s.get('name',str(s)))`.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "/api/applications", "issue": "Endpoint shape is undocumented in tests — frontend uses /api/applications (no /mine suffix); confirm naming consistency across docs."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CVPage / SettingsPage date inputs", "issue": "<input type='date'> shows browser default 'mm/dd/yyyy' (US format) instead of fr-FR or shadcn Calendar — bad UX for French users.", "selector": "input[type=date]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CVPage <select data-testid=pdf-template>", "issues": ["React hydration warning: <span> cannot be a child of <option> — likely the Emergent dev overlay injecting x-excluded spans, but visible in console as error. Native <select>/<option> avoids shadcn Select overlay issues so functionally OK."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_cv.py",
+    "/app/test_reports/pytest/pytest_iter6.xml"
+  ],
+  "action_items": [
+    "HIGH: harden build_cv_pdf to handle skills as either string or {name,level} dict (server.py:2637 modern and 2850 classique). Currently a 500 for valid stored data.",
+    "Optional: add Pydantic model for PUT /api/cv body instead of raw dict to validate skill/experience/education item shapes.",
+    "LOW: replace native <input type=date> with shadcn Calendar to localize date pickers (fr-FR)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 3073 lines — still well past the 700-line threshold; iter5 already flagged this. Iter6 added ~620 lines of PDF templating; perfect opportunity to split into backend/cv_pdf.py.",
+    "PUT /api/cv accepts a raw dict without Pydantic — same pattern flagged previously for /api/profile-v2. While the route uses allowed_fields whitelist (good), there is no per-field type validation. A client can PUT {skills:[1,2,3]} or {educations:'foo'} and break downstream code.",
+    "build_cv_pdf is a monolithic ~440-line function with 5 template branches — would benefit from a Strategy pattern (one function per template).",
+    "/api/applications/{id}/cv and /cv/export duplicate access-control logic — extract a helper `assert_can_view_application(app, user)` to DRY.",
+    "online_cv_snapshot deep-copies the live CV at apply time (good — snapshot freeze test passed) but it pulls the user's CURRENT pdf_template at PUT time, while the application stores its own online_cv_template. Confirm this is intentional (looks correct).",
+    "test_no_online_cv_application skipped because brightstudio011 only owns 1 offer — seed could include >= 2 offers per company for richer regression testing."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter6_cv.py (new — 22 tests for iter6: CV templates, application snapshot, company access, snapshot freeze, visibility variants)"
+  ],
+  "success_rate": {"backend": "95% (21/22, 1 skipped due to missing test fixture data — not a code defect)", "frontend": "100% on tested flows (CV page templates dropdown, Apply modal full path, company-side CV preview block, profile view-cv-btn, /cv/{id} read-only mode)"},
+  "test_credentials": "lucas.martin@email.fr/Demo1234! (candidate), hr@brightstudio011.fr/Demo1234! & hr@technova.fr/Demo1234! (companies), admin@stagiaireconnect.fr/Admin123! — from /app/memory/test_credentials.md",
+  "seed_data_creation": "Created one extra application from lucas.martin to a TechNova offer (TEST_iter3 offer, app_id=app_646beae72914) with use_online_cv=True online_cv_template=alternance — used to verify company-side flows. Lucas's online CV restored to clean state (skills as strings, sample experience+education+language).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: REACT_APP_BACKEND_URL=https://joblink-stages.preview.emergentagent.com pytest /app/backend/tests/test_iter6_cv.py -v. The autouse _reset_cv_skills fixture forces lucas.martin's CV skills back to STRINGS before export tests — without this, prior dict-shaped pollution causes 500 on modern/classique templates (a real backend defensive bug). The skipped test (test_no_online_cv_application_returns_404) only passes if brightstudio011 owns >=2 offers; main agent could seed an extra offer or change the test to delete-then-recreate.",
+  "rca of the issue": "build_cv_pdf modern (server.py:2637) and classique (server.py:2850) call `' · '.join(cv['skills'])` which requires every skill to already be a string. The frontend CVPage stores skills as plain strings (canonical format), but the backend never enforces this via Pydantic — so anyone PUTting {skills: [{name:'Python'}]} (which my initial test did, mirroring the future feature where skills get a level) crashes both PDF templates with TypeError. Fix: replace each occurrence with `' · '.join(s if isinstance(s,str) else s.get('name','') for s in cv['skills'])`. Reproduce: PUT /api/cv with skills=[{'name':'Python'}], then GET /api/cv/export?template=modern → 500."
+}

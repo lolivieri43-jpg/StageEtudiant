@@ -1,0 +1,9 @@
+{
+  "professional_title": "Étudiant Full-Stack",
+  "summary": "Étudiant en BTS SIO passionné par le développement web.",
+  "skills": ["React", "Python", "FastAPI"],
+  "experiences": [{"job_title":"Stage dev","company_name":"WebCorp","city":"Lyon","start_date":"2024","end_date":"2024","experience_type":"stage","description":"Développement d'une app interne en React/Node."}],
+  "educations": [{"degree":"BTS SIO","school":"Lycée Ampère","city":"Lyon","start_date":"2023","end_date":"2025"}],
+  "languages": [{"language":"Anglais","level":"avancé"},{"language":"Espagnol","level":"intermédiaire"}],
+  "visibility": "public"
+}

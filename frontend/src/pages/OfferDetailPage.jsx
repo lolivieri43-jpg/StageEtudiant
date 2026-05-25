@@ -2,12 +2,20 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { MapPin, Clock, Briefcase, Wifi, CheckCircle2, Calendar, Award, Building2, Eye, Send, Bookmark } from "lucide-react";
+import { MapPin, Clock, Briefcase, Wifi, CheckCircle2, Calendar, Award, Building2, Eye, Send, Bookmark, FileText, FileCheck2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
+
+const TEMPLATES = [
+  { id: "modern", label: "Moderne" },
+  { id: "classique", label: "Classique" },
+  { id: "etudiant", label: "Étudiant" },
+  { id: "alternance", label: "Alternance" },
+  { id: "professionnel", label: "Professionnel" },
+];
 
 export default function OfferDetailPage() {
   const { id } = useParams();
@@ -18,11 +26,35 @@ export default function OfferDetailPage() {
   const [letter, setLetter] = useState("");
   const [applying, setApplying] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [myCv, setMyCv] = useState(null);
+  const [myDocs, setMyDocs] = useState([]);
+  const [useOnlineCv, setUseOnlineCv] = useState(true);
+  const [cvTemplate, setCvTemplate] = useState("modern");
+  const [pickedDocs, setPickedDocs] = useState({});
 
   useEffect(() => {
     api.get(`/offers/${id}`).then((r) => setOffer(r.data)).catch(() => navigate("/offers"));
     if (user) api.get("/saved-offers").then((r) => setSaved(r.data.some(o => o.offer_id === id))).catch(() => {});
   }, [id, navigate, user]);
+
+  // Prefetch CV + documents when the apply dialog opens
+  useEffect(() => {
+    if (!applyOpen || !user || user.role !== "candidate") return;
+    (async () => {
+      try {
+        const cv = await api.get("/cv").then(r => r.data);
+        setMyCv(cv);
+        setCvTemplate(cv?.pdf_template || "modern");
+        // CV is considered "ready" if title or summary is set
+        const ready = !!(cv?.professional_title || cv?.summary || (cv?.experiences || []).length || (cv?.educations || []).length);
+        setUseOnlineCv(ready);
+      } catch { setMyCv(null); }
+      try {
+        const docs = await api.get(`/users/${user.user_id}/documents`).then(r => r.data);
+        setMyDocs(docs || []);
+      } catch { setMyDocs([]); }
+    })();
+  }, [applyOpen, user]);
 
   const toggleSave = async () => {
     if (!user) { navigate("/login"); return; }
@@ -35,7 +67,14 @@ export default function OfferDetailPage() {
     if (!user) { navigate("/login"); return; }
     setApplying(true);
     try {
-      await api.post("/applications", { offer_id: id, cover_letter: letter });
+      const uploaded_doc_ids = Object.entries(pickedDocs).filter(([, v]) => v).map(([k]) => k);
+      await api.post("/applications", {
+        offer_id: id,
+        cover_letter: letter,
+        use_online_cv: useOnlineCv,
+        online_cv_template: cvTemplate,
+        uploaded_doc_ids,
+      });
       toast.success("Candidature envoyée !");
       setApplyOpen(false);
     } catch (err) {
@@ -44,6 +83,10 @@ export default function OfferDetailPage() {
       setApplying(false);
     }
   };
+
+  const cvReady = !!(myCv && (myCv.professional_title || myCv.summary || (myCv.experiences || []).length || (myCv.educations || []).length));
+  const cvDocs = myDocs.filter(d => d.doc_type === "cv");
+  const otherDocs = myDocs.filter(d => d.doc_type !== "cv");
 
   if (!offer) return <div className="pt-24 text-center text-slate-400">Chargement...</div>;
 
@@ -108,10 +151,84 @@ export default function OfferDetailPage() {
       </div>
 
       <Dialog open={applyOpen} onOpenChange={setApplyOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Postuler à cette offre</DialogTitle></DialogHeader>
-          <p className="text-sm text-slate-500">Ajoutez une lettre de motivation (optionnel) pour vous démarquer.</p>
-          <Textarea data-testid="cover-letter" value={letter} onChange={(e) => setLetter(e.target.value)} rows={6} className="rounded-xl" placeholder="Bonjour, je suis intéressé(e) par cette offre car..." />
+
+          {user?.role === "candidate" && (
+            <div className="space-y-4">
+              {/* CV en ligne */}
+              <div className="border border-slate-200 rounded-2xl p-4" data-testid="apply-online-cv-block">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useOnlineCv}
+                    disabled={!cvReady}
+                    onChange={(e) => setUseOnlineCv(e.target.checked)}
+                    className="mt-1 accent-blue-600 w-4 h-4"
+                    data-testid="apply-use-online-cv"
+                  />
+                  <div className="flex-1">
+                    <div className="font-semibold text-slate-900 flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-blue-500" />Joindre mon CV en ligne</div>
+                    {cvReady ? (
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        Une copie de votre CV en ligne sera figée et envoyée à l'entreprise.
+                      </div>
+                    ) : (
+                      <div className="text-xs text-amber-600 mt-0.5">
+                        Votre CV en ligne est vide. <Link to="/cv" className="underline">Remplissez-le</Link> pour pouvoir le joindre.
+                      </div>
+                    )}
+                    {useOnlineCv && cvReady && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Modèle:</span>
+                        <select
+                          value={cvTemplate}
+                          onChange={(e) => setCvTemplate(e.target.value)}
+                          className="rounded-full border border-slate-200 h-8 px-3 text-xs bg-white"
+                          data-testid="apply-cv-template"
+                        >
+                          {TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </label>
+              </div>
+
+              {/* PDF uploadé */}
+              <div className="border border-slate-200 rounded-2xl p-4">
+                <div className="font-semibold text-slate-900 flex items-center gap-2 mb-2"><FileText className="w-4 h-4 text-violet-500" />Joindre un PDF déjà uploadé</div>
+                {cvDocs.length === 0 && otherDocs.length === 0 ? (
+                  <p className="text-xs text-slate-400">Aucun document uploadé.{" "}
+                    <Link to={`/profile/${user.user_id}`} className="underline text-blue-600">Ajouter un document</Link>
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {[...cvDocs, ...otherDocs].map(d => (
+                      <label key={d.doc_id} className="flex items-center gap-2 cursor-pointer text-sm" data-testid={`apply-doc-${d.doc_id}`}>
+                        <input
+                          type="checkbox"
+                          checked={!!pickedDocs[d.doc_id]}
+                          onChange={(e) => setPickedDocs({ ...pickedDocs, [d.doc_id]: e.target.checked })}
+                          className="accent-blue-600"
+                        />
+                        <FileText className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="truncate">{d.filename}</span>
+                        <Badge className="rounded-full bg-slate-100 text-slate-600 border-0 text-[10px] ml-auto">{d.doc_type}</Badge>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Cover letter */}
+              <div>
+                <label className="font-semibold text-slate-900 text-sm">Lettre de motivation (optionnel)</label>
+                <Textarea data-testid="cover-letter" value={letter} onChange={(e) => setLetter(e.target.value)} rows={5} className="rounded-xl mt-1" placeholder="Bonjour, je suis intéressé(e) par cette offre car..." />
+              </div>
+            </div>
+          )}
+
           <Button onClick={apply} disabled={applying} className="rounded-xl bg-blue-600 hover:bg-blue-700" data-testid="submit-application">
             {applying ? "Envoi..." : "Envoyer ma candidature"}
           </Button>
