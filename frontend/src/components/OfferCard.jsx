@@ -4,7 +4,7 @@ import { MapPin, Clock, Briefcase, CheckCircle2, Wifi, ExternalLink } from "luci
 import { Badge } from "./ui/badge";
 
 const SOURCE_LABELS = {
-  StageConnect: "StageConnect",
+  StageConnect: "StageEtudiant",
   HelloWork: "HelloWork",
   LinkedIn: "LinkedIn",
   Indeed: "Indeed",
@@ -23,7 +23,7 @@ const SOURCE_LABELS = {
 export default function OfferCard({ offer }) {
   const isExternalUrl = offer.source && offer.source !== "StageConnect" && (offer.external_url || offer.apply_url);
   const externalHref = offer.external_url || offer.apply_url;
-  const sourceLabel = SOURCE_LABELS[offer.source] || offer.source || "StageConnect";
+  const sourceLabel = SOURCE_LABELS[offer.source] || offer.source || "StageEtudiant";
   const inner = (
     <>
       <div className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shadow-sm" data-testid={`source-badge-${offer.offer_id}`}>

@@ -1,4 +1,4 @@
-"""FastAPI backend for StagiaireConnect - French stage/alternance platform."""
+"""FastAPI backend for StageEtudiant - French stage/alternance platform."""
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -28,7 +28,7 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', 'stagiaire-connect-secret-2026-very-long-key')
 JWT_ALG = 'HS256'
 
-app = FastAPI(title="StagiaireConnect API")
+app = FastAPI(title="StageEtudiant API")
 api = APIRouter(prefix="/api")
 
 # ============ MODELS ============
@@ -938,7 +938,7 @@ async def seed(force: bool = False):
 
 @api.get("/")
 async def root():
-    return {"name": "StagiaireConnect API", "status": "ok"}
+    return {"name": "StageEtudiant API", "status": "ok"}
 
 # ============ DEALS / BONS PLANS + MONETIZATION ============
 try:
@@ -1559,7 +1559,7 @@ async def remove_photo(photo_id: str, user=Depends(get_current_user)):
 async def list_sources():
     return {
         "sources": [
-            {"id": "StageConnect", "label": "StageConnect", "internal": True},
+            {"id": "StageConnect", "label": "StageEtudiant", "internal": True},
             {"id": "HelloWork", "label": "HelloWork", "internal": False},
             {"id": "LinkedIn", "label": "LinkedIn", "internal": False},
             {"id": "Indeed", "label": "Indeed", "internal": False},
@@ -3158,7 +3158,7 @@ async def platform_stats():
         "real_obtained_count": real_count,
         "displayed_obtained_count": displayed,
         "use_manual_count": bool(use_manual),
-        "public_message": settings.get("public_message") or "étudiants ont trouvé un stage ou une alternance via StageConnect",
+        "public_message": settings.get("public_message") or "étudiants ont trouvé un stage ou une alternance via StageEtudiant",
         "show_counter": settings.get("show_counter", True),
         "total_companies": await db.users.count_documents({"role": "company"}),
         "total_candidates": await db.users.count_documents({"role": "candidate"}),
@@ -3174,7 +3174,7 @@ async def admin_platform_stats(user=Depends(get_current_user)):
         "key": "main",
         "displayed_obtained_count": 0,
         "use_manual_count": False,
-        "public_message": "étudiants ont trouvé un stage ou une alternance via StageConnect",
+        "public_message": "étudiants ont trouvé un stage ou une alternance via StageEtudiant",
         "show_counter": True,
     }
     real_count = await db.applications.count_documents({"status": {"$in": list(OBTAINED_STATUSES)}})
@@ -3188,7 +3188,7 @@ async def admin_set_platform_stats(body: dict, user=Depends(get_current_user)):
     update = {
         "displayed_obtained_count": int(body.get("displayed_obtained_count", 0)),
         "use_manual_count": bool(body.get("use_manual_count", False)),
-        "public_message": str(body.get("public_message") or "étudiants ont trouvé un stage ou une alternance via StageConnect")[:200],
+        "public_message": str(body.get("public_message") or "étudiants ont trouvé un stage ou une alternance via StageEtudiant")[:200],
         "show_counter": bool(body.get("show_counter", True)),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

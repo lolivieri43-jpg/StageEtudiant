@@ -47,7 +47,7 @@ export default function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
         <Link to="/" className="flex items-center gap-2 shrink-0" data-testid="logo-link">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 grid place-items-center text-white font-black">S</div>
-          <span className="font-black text-lg tracking-tight hidden sm:inline">StagiaireConnect</span>
+          <span className="font-black text-lg tracking-tight hidden sm:inline">StageEtudiant</span>
         </Link>
 
         <form onSubmit={submit} className="flex-1 max-w-xl" data-testid="header-search-form">

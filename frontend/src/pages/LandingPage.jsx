@@ -261,7 +261,7 @@ export default function LandingPage() {
       <section className="py-24 bg-gradient-to-br from-blue-600 to-violet-700 text-white">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="text-4xl sm:text-5xl font-black mb-6">Prêt à lancer ta carrière ?</h2>
-          <p className="text-blue-100 text-lg mb-8">Rejoins des milliers d'étudiants et d'entreprises qui font confiance à StagiaireConnect.</p>
+          <p className="text-blue-100 text-lg mb-8">Rejoins des milliers d'étudiants et d'entreprises qui font confiance à StageEtudiant.</p>
           <div className="flex flex-wrap justify-center gap-3">
             <Link to="/register?role=candidate"><Button className="rounded-full bg-white text-blue-700 hover:bg-blue-50 h-12 px-6" data-testid="cta-bottom-candidate">Créer un compte étudiant</Button></Link>
             <Link to="/register?role=company"><Button variant="outline" className="rounded-full border-white text-white hover:bg-white hover:text-blue-700 h-12 px-6 bg-transparent" data-testid="cta-bottom-company">Créer un compte entreprise</Button></Link>
@@ -271,7 +271,7 @@ export default function LandingPage() {
 
       <footer className="bg-slate-900 text-slate-400 py-12">
         <div className="max-w-7xl mx-auto px-6 text-center text-sm">
-          <div className="font-black text-white text-lg mb-2">StagiaireConnect</div>
+          <div className="font-black text-white text-lg mb-2">StageEtudiant</div>
           <p>© 2026 — La plateforme française du stage et de l'alternance</p>
         </div>
       </footer>
