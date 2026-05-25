@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag, Sun, Moon } from "lucide-react";
+import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag, Sun, Moon, Building2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import api from "../lib/api";
@@ -81,6 +81,10 @@ export default function Header() {
             <Link to="/offers" className="hidden md:flex flex-col items-center px-3 py-1 text-slate-600 hover:text-blue-600" data-testid="nav-offers">
               <Briefcase className="w-5 h-5" />
               <span className="text-[10px] font-medium">Offres</span>
+            </Link>
+            <Link to="/companies" className="hidden md:flex flex-col items-center px-3 py-1 text-slate-600 hover:text-blue-600" data-testid="nav-companies">
+              <Building2 className="w-5 h-5" />
+              <span className="text-[10px] font-medium">Entreprises</span>
             </Link>
             <Link to="/deals" className="hidden md:flex flex-col items-center px-3 py-1 text-slate-600 hover:text-violet-600" data-testid="nav-deals">
               <Tag className="w-5 h-5" />

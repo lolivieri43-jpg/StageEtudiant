@@ -1,0 +1,46 @@
+{
+  "summary": "Phase B (Iter7-B) — External Company Search via Annuaire/Recherche d'Entreprises (gouv.fr). Backend: 17/17 tests PASSED (search by q/cp/dep/region/naf, 400 if no criteria, cache TTL 7d hit on 2nd identical call, /companies/siret/{siret} with 404 on invalid, admin /external-cache list/refresh/delete, role gating 403 for non-admin, request logs persisted, profile-v2 accepts new fields siren/postal_code/naf_code/siret_verified/siret_verified_at). Frontend /companies (anonymous): ALL 6 testids present (cs-q, cs-cp, cs-dep, cs-region, cs-naf, cs-submit), search 'decathlon' returned '150 entreprises trouvées' with 12 cards each showing name/region/address/NAF/SIRET, 'Cache' badge appears on 2nd identical call. Header nav-companies link exists in code for logged users (data-testid='nav-companies', route '/companies'). CRITICAL bug found on /register entreprise: SiretLookup component renders an inner <form> nested inside RegisterPage's outer <form>, producing React hydration error AND making the inner search button bubble its click to the parent form — search results never display (Found 0 pick options after waiting). Profile company edit modal uses SiretLookup inside a Dialog (NOT wrapped in form) so should work, but blocked from full UI verification by login flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/companies/siret/{siret}", "issue": "Response does NOT include a cache_hit flag (unlike /companies/search). Detail caching is verified by internal logs only — clients cannot observe cache state. Consider adding cache_hit in the returned dict for parity with search."},
+      {"endpoint": "GET /api/admin/external-cache (anonymous)", "issue": "Returns 401 (no auth) — fine; documented review_request expected '403 sinon'. Tolerant test passes on (401, 403)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SiretLookup (inside RegisterPage company mode)", "issue": "CRITICAL: SiretLookup wraps its input+button in <form onSubmit={search}>. RegisterPage already wraps the whole content in <form onSubmit={submit}>. Nested <form> is invalid HTML (visible hydration error: '<form> cannot contain a nested form'). Clicking the inner siret-lookup-search button (type=submit) submits BOTH forms simultaneously, so the outer register form attempts submission with empty fields; the inner search XHR is fired but the React state update is lost or the page state shifts so results don't render — Playwright observed 0 siret-pick-* nodes after 6s wait.", "selector": "[data-testid='siret-lookup'] form", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Register Entreprise → search company via SiretLookup → pick → preview", "issue": "Cannot complete the flow because of the nested-form bug above. register-company-picked element never appears and register-name input is never populated.", "affected_selectors": ["[data-testid='siret-lookup-search']", "[data-testid^='siret-pick-']", "[data-testid='register-company-picked']", "[data-testid='register-name']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter7_phaseB.py",
+    "/app/test_reports/pytest/pytest_iter8.xml"
+  ],
+  "action_items": [
+    "HIGH: Fix nested-form bug in /app/frontend/src/components/SiretLookup.jsx. Two simple options: (a) Replace the inner <form onSubmit={search}> with <div> and trigger search via the button's onClick={search}; OR (b) Stop event propagation in search() — but option (a) also fixes the HTML validity hydration error. Recommended: change line 35 to <div className=\"flex gap-2\"> and line 43 button to type=\"button\" onClick={search}. This will also keep the inner Enter-key submission via onKeyDown on the Input if desired.",
+    "OPTIONAL: Add cache_hit (and cached_at) to GET /api/companies/siret/{siret} response for parity with /companies/search.",
+    "OPTIONAL: ProfilePage edit-modal flow with SiretLookup not fully UI-tested due to login flow time; recommend a quick self-test by main agent after SiretLookup fix to confirm pick prefills edit-company-name / edit-siret / edit-sector / city."
+  ],
+  "critical_code_review_comments": [
+    "server.py reached 3345 lines (was 3242 in Phase A). Phase B added ~95 lines — strong case for splitting into backend/external_api.py (mounting ext_api router) per the 700-line rule.",
+    "external_companies.py uses requests (sync) inside run_in_executor — acceptable, but consider httpx.AsyncClient for cleaner async and shared connection pooling.",
+    "Cache invalidation: DELETE /admin/external-cache?scope=all wipes BOTH collections in one call — no soft-delete or backup; for a public-data cache this is fine but log a warning event for audit (currently no admin_action log written).",
+    "Anonymous tracking: companies_search uses get_optional_user but the result is not stored in logs (user_id never captured in api_request_logs). Minor — but useful for analytics in admin dashboard.",
+    "SiretLookup nested <form> (HIGH priority bug, see frontend_issues) — also produces a React 19 hydration warning that pollutes the browser console.",
+    "REGION_NAMES in external_companies.py covers only 18 INSEE codes (mainland + DOM) — codes like '06' map to Mayotte but INSEE recently re-used codes; verify mapping against official source if precision matters."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter7_phaseB.py (new — 17 tests, 100% pass)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "85% — /companies page 100% (search + cache badge + 6 fields), Header nav-companies present in code; RegisterPage SiretLookup broken (nested form). Profile edit modal not fully exercised."},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123! ; hr@brightstudio011.fr/Demo1234! ; lucas.martin@email.fr/Demo1234! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test wrote profile-v2 fields siren=552120222, postal_code=59000, naf_code=62.01Z, siret_verified=true, siret_verified_at=<now> to user hr@brightstudio011.fr's profile. Cache collections external_company_search_cache and external_company_details_cache were populated with 'technova', 'decathlon', 'carrefour', 'leroymerlin', 'logcheck*' entries, then test_delete_cache_all wiped both at end of one run (re-populated by later tests).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase B backend tests live at /app/backend/tests/test_iter7_phaseB.py — run via `pytest backend/tests/test_iter7_phaseB.py -v`. The cache-hit test uses a unique q (timestamped) to guarantee first call is fresh; subsequent identical q must return cache_hit=true. Annuaire public API can be slow (~1-3s for first call); tests use 20s timeouts. After main agent fixes SiretLookup nested-form bug, re-run a quick Playwright test of: (1) /register → click Entreprise → fill siret-lookup-input with 'decathlon' → click siret-lookup-search → wait 3s → expect >=1 siret-pick-* nodes → click first pick → expect [data-testid='register-company-picked'] visible AND [data-testid='register-name'] populated. (2) Login as company → /profile/{uid} → click Modifier → expect siret-lookup inside the dialog → search 'decathlon' → pick first → expect edit-company-name, edit-siret, edit-sector prefilled.",
+  "rca of the issue": "RCA — SiretLookup nested form bug:\n• Root cause: /app/frontend/src/components/SiretLookup.jsx line 35 renders <form onSubmit={search}> with a child <Button type=\"submit\">. Whenever this component is mounted INSIDE another <form> (RegisterPage line ~80), the DOM contains nested forms which is invalid HTML and causes React to emit a hydration error visible in the browser console: 'In HTML, <form> cannot be a descendant of <form>'.\n• Behavioral impact: When the user clicks the inner submit button (type=submit), the browser fires submit on the closest form (SiretLookup's), then bubbles. While preventDefault inside search() stops the inner submit's default, the React reconciliation of the now-invalid DOM tree can cause the parent RegisterPage form to also receive the submit event in some browsers, OR React tears down the inner state — net effect observed in Playwright: the API call appears not to render results (0 siret-pick-* nodes after 6s wait).\n• Reproduction: open https://joblink-stages.preview.emergentagent.com/register → click 'Entreprise' card → fill the SIRET lookup input with 'decathlon' → click the blue magnifier button → console emits hydration error → no result cards appear.\n• Mitigation: change SiretLookup.jsx to use a <div> + button type=\"button\" onClick={search}; optionally add onKeyDown Enter handler on the Input. This is a 3-line change and is the single recommended fix. After fix, the profile edit modal flow (which already places SiretLookup inside a Dialog, NOT a form, so it should already work) will continue to work; the register page flow will start working."
+}

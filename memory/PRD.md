@@ -25,7 +25,19 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
-## Iteration 6 (2026-02) — CV en ligne, candidature enrichie, 5 modèles PDF
+## Iteration 7 (2026-02) — Phase A : Mode sombre, Vues profils Premium, Preuve sociale
+- ✅ **Mode clair/sombre/auto** : `ThemeContext` + tokens CSS `:root` / `.dark` (bleu nuit pro), overrides Tailwind hardcodés, bouton bascule Header (`theme-toggle`), sélecteur 3 options Settings
+- ✅ **Persistance thème** : localStorage anonyme + `user.theme_preference` via `PATCH /api/me/theme` (light|dark|system)
+- ✅ **Profile views** : `profile_views` collection + log fire-and-forget dans `GET /users/{id}` (dédup 30 min)
+- ✅ **API vues** : `/api/me/profile-views/stats` (public — total/7j/30j/distinct) + `/api/me/profile-views` (détails, 402 Free → CTA Premium)
+- ✅ **Composant `ProfileViews`** sur dashboards candidat+entreprise
+- ✅ **Compteur "stages obtenus"** : statuts `internship_obtained`, `apprenticeship_obtained`, `contract_signed` ajoutés à `PATCH /applications/{id}/status`
+- ✅ **`/api/stats/platform`** public + `/api/admin/platform-stats` (GET/PUT) avec mode marketing override `use_manual_count` + message custom + show_counter on/off
+- ✅ **`PlatformCounter`** affiché Landing + Dashboards (compact)
+- ✅ **Admin** : bloc `admin-platform-stats` avec inputs Show/Manual/Displayed/Message + save
+- ✅ Tests : 14/14 backend pass + 18/18 frontend pass
+
+
 - ✅ **CV en ligne CRUD** : `/api/cv` (GET/PUT) + `/api/users/{id}/cv` (lecture publique selon visibilité public/connected/after_application/private)
 - ✅ **5 modèles PDF distincts** : Moderne (bleu, 1 col), Classique (Times serif centré + divider), Étudiant (bannière colorée + chips), Alternance (violet 2 colonnes), Professionnel (sidebar sombre)
 - ✅ **Modèle par défaut** : `pdf_template` sauvegardé dans le profil CV + sélecteur à l'export (CVPage, modale de candidature, ApplicationDetailPage)

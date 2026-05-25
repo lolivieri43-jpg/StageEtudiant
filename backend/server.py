@@ -2298,6 +2298,8 @@ async def update_profile_cascade(data: dict, user=Depends(get_current_user)):
         "company_name", "logo", "banner", "sector", "size", "address", "city",
         "region", "siret", "website", "description", "hr_contact", "pro_email",
         "phone", "recruiting_domains", "company_status",
+        # Phase B — official directory enrichment
+        "siren", "postal_code", "naf_code", "siret_verified", "siret_verified_at",
     }
     allowed = COMPANY_FIELDS if user["role"] == "company" else CANDIDATE_FIELDS
     profile = user.get("profile", {})
@@ -3199,6 +3201,107 @@ async def admin_set_platform_stats(body: dict, user=Depends(get_current_user)):
 
 
 app.include_router(api)
+
+
+# ============ ITERATION 8: Phase B — External Companies (Annuaire / Recherche d'Entreprises gouv.fr) ============
+from external_companies import (
+    search_companies as ext_search,
+    get_company_by_siret as ext_get,
+)
+
+ext_api = APIRouter(prefix="/api")
+
+@ext_api.get("/companies/search")
+async def companies_search(
+    q: Optional[str] = None,
+    code_postal: Optional[str] = None,
+    departement: Optional[str] = None,
+    region: Optional[str] = None,
+    activite_principale: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 10,
+    user=Depends(get_optional_user),  # logged user not required but tracked if present
+):
+    """Search French companies via the public Annuaire d'Entreprises API (cached 7d)."""
+    if not any([q, code_postal, departement, region, activite_principale]):
+        raise HTTPException(400, "Au moins un critère de recherche est requis")
+    return await ext_search(
+        db, q=q, code_postal=code_postal, departement=departement, region=region,
+        activite_principale=activite_principale, page=page, per_page=per_page,
+    )
+
+
+@ext_api.get("/companies/siret/{siret}")
+async def companies_get_by_siret(siret: str):
+    """Fetch company by SIRET (or SIREN). Cached 30 days."""
+    data = await ext_get(db, siret)
+    if not data:
+        raise HTTPException(404, "Entreprise introuvable")
+    return data
+
+
+@ext_api.post("/admin/external-cache/refresh")
+async def admin_refresh_external_cache(body: dict, user=Depends(get_current_user)):
+    """Admin: force a re-fetch (bypass cache) for a given search or SIRET."""
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    kind = body.get("kind", "search")
+    if kind == "siret":
+        siret = body.get("siret")
+        if not siret: raise HTTPException(400, "siret requis")
+        return await ext_get(db, siret, force_refresh=True)
+    return await ext_search(
+        db, q=body.get("q"), code_postal=body.get("code_postal"),
+        departement=body.get("departement"), region=body.get("region"),
+        activite_principale=body.get("activite_principale"),
+        page=int(body.get("page", 1)), per_page=int(body.get("per_page", 10)),
+        force_refresh=True,
+    )
+
+
+@ext_api.delete("/admin/external-cache")
+async def admin_clear_external_cache(scope: str = "all", user=Depends(get_current_user)):
+    """Admin: purge external company cache. scope=search|details|all"""
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    deleted = {"search": 0, "details": 0}
+    if scope in ("search", "all"):
+        r = await db.external_company_search_cache.delete_many({})
+        deleted["search"] = r.deleted_count
+    if scope in ("details", "all"):
+        r = await db.external_company_details_cache.delete_many({})
+        deleted["details"] = r.deleted_count
+    return {"ok": True, "deleted": deleted}
+
+
+@ext_api.get("/admin/external-cache")
+async def admin_list_external_cache(limit: int = 30, user=Depends(get_current_user)):
+    """Admin: list cached entries + recent api logs."""
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    searches = await db.external_company_search_cache.find(
+        {}, {"_id": 0, "results": 0}
+    ).sort("cached_at", -1).limit(limit).to_list(limit)
+    details = await db.external_company_details_cache.find(
+        {}, {"_id": 0}
+    ).sort("cached_at", -1).limit(limit).to_list(limit)
+    logs = await db.api_request_logs.find(
+        {}, {"_id": 0}
+    ).sort("created_at", -1).limit(50).to_list(50)
+    errors = await db.api_error_logs.find(
+        {}, {"_id": 0}
+    ).sort("created_at", -1).limit(20).to_list(20)
+    return {
+        "search_cache_count": len(searches),
+        "details_cache_count": len(details),
+        "search_cache_entries": searches,
+        "details_cache_entries": details,
+        "recent_logs": logs,
+        "recent_errors": errors,
+    }
+
+
+app.include_router(ext_api)  # register Phase B external company endpoints
 
 app.add_middleware(
     CORSMiddleware,

@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import SiretLookup from "../components/SiretLookup";
+import api from "../lib/api";
 import { toast } from "sonner";
 import { Building2, GraduationCap } from "lucide-react";
 
@@ -13,13 +15,38 @@ export default function RegisterPage() {
   const [params] = useSearchParams();
   const [role, setRole] = useState(params.get("role") || "candidate");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [companyData, setCompanyData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const onPickCompany = (c) => {
+    setCompanyData(c);
+    setForm((f) => ({ ...f, name: c.name || f.name }));
+    toast.success("Entreprise sélectionnée — informations préremplies");
+  };
 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await register({ ...form, role });
+      const user = await register({ ...form, role });
+      // If company + officially-resolved data → push it to the profile
+      if (role === "company" && companyData) {
+        try {
+          await api.put("/profile-v2", {
+            company_name: companyData.name,
+            siret: companyData.siret,
+            siren: companyData.siren,
+            city: companyData.city,
+            postal_code: companyData.postal_code,
+            region: companyData.region,
+            address: companyData.address,
+            naf_code: companyData.naf_code,
+            sector: companyData.naf_code || "",
+            siret_verified: true,
+            siret_verified_at: new Date().toISOString(),
+          });
+        } catch { /* non-blocking */ }
+      }
       toast.success("Compte créé !");
       navigate("/dashboard");
     } catch (err) {
@@ -51,6 +78,18 @@ export default function RegisterPage() {
         </div>
 
         <form onSubmit={submit} className="card-soft p-8 space-y-4">
+          {role === "company" && (
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+              <Label className="text-blue-900 font-semibold">Rechercher votre entreprise officielle</Label>
+              <p className="text-xs text-slate-600 mb-2">Données INSEE/Annuaire — gain de temps et SIRET vérifié.</p>
+              <SiretLookup onSelect={onPickCompany} defaultQuery={form.name} />
+              {companyData && (
+                <div className="mt-2 text-xs text-blue-800 bg-white rounded-xl px-3 py-2" data-testid="register-company-picked">
+                  ✓ {companyData.name} — SIRET {companyData.siret}
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <Label>{role === "company" ? "Nom de l'entreprise" : "Nom et prénom"}</Label>
             <Input data-testid="register-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="rounded-xl mt-1" />

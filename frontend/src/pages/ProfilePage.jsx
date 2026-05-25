@@ -11,6 +11,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import OfferCard from "../components/OfferCard";
 import FileUploader from "../components/FileUploader";
+import SiretLookup from "../components/SiretLookup";
 import { toast } from "sonner";
 
 const STUDENT_STATUS = {
@@ -340,7 +341,28 @@ export default function ProfilePage() {
           <div className="space-y-3">
             {isCompany ? (
               <>
+                <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3">
+                  <Label className="text-blue-900 font-semibold text-xs">Rechercher dans l'Annuaire officiel</Label>
+                  <p className="text-[11px] text-slate-600 mb-2">Préremplit nom, SIRET, adresse, NAF...</p>
+                  <SiretLookup
+                    onSelect={(c) => setForm({
+                      ...form,
+                      company_name: c.name || form.company_name,
+                      siret: c.siret || form.siret,
+                      siren: c.siren,
+                      city: c.city || form.city,
+                      postal_code: c.postal_code,
+                      region: c.region || form.region,
+                      address: c.address || form.address,
+                      naf_code: c.naf_code,
+                      siret_verified: true,
+                      siret_verified_at: new Date().toISOString(),
+                    })}
+                    defaultQuery={form.company_name}
+                  />
+                </div>
                 <Field label="Nom de l'entreprise" value={form.company_name} onChange={(v) => setForm({ ...form, company_name: v })} testid="edit-company-name" />
+                <Field label="SIRET" value={form.siret} onChange={(v) => setForm({ ...form, siret: v })} testid="edit-siret" />
                 <Field label="Secteur" value={form.sector} onChange={(v) => setForm({ ...form, sector: v })} testid="edit-sector" />
                 <Field label="Taille" value={form.size} onChange={(v) => setForm({ ...form, size: v })} />
                 <Field label="Ville" value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
