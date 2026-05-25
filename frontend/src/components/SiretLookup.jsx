@@ -16,6 +16,7 @@ export default function SiretLookup({ onSelect, defaultQuery = "" }) {
 
   const search = async (e) => {
     if (e?.preventDefault) e.preventDefault();
+    if (e?.stopPropagation) e.stopPropagation();
     if (!q.trim()) return;
     setLoading(true);
     setError(null);
@@ -32,18 +33,19 @@ export default function SiretLookup({ onSelect, defaultQuery = "" }) {
 
   return (
     <div className="space-y-3" data-testid="siret-lookup">
-      <form onSubmit={search} className="flex gap-2">
+      <div className="flex gap-2">
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); search(); } }}
           placeholder="Nom de l'entreprise ou SIRET (14 chiffres)"
           className="rounded-xl flex-1"
           data-testid="siret-lookup-input"
         />
-        <Button type="submit" disabled={loading || !q.trim()} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="siret-lookup-search">
+        <Button type="button" onClick={search} disabled={loading || !q.trim()} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="siret-lookup-search">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
         </Button>
-      </form>
+      </div>
 
       {error && (
         <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">

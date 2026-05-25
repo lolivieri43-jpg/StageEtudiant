@@ -25,7 +25,20 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
-## Iteration 7 (2026-02) — Phase A : Mode sombre, Vues profils Premium, Preuve sociale
+## Iteration 8 (2026-02) — Phase B : Annuaire d'Entreprises officiel
+- ✅ **API Recherche d'Entreprises (gouv.fr)** : publique, sans clé, intégrée via `/app/backend/external_companies.py` (normalize + cache)
+- ✅ **Endpoints** : `GET /api/companies/search?q&code_postal&departement&region&activite_principale&page&per_page` (400 si pas de critère) ; `GET /api/companies/siret/{siret}` (404 si inconnu)
+- ✅ **Cache MongoDB** : `external_company_search_cache` (TTL 7j) + `external_company_details_cache` (TTL 30j) avec `cache_hit` flag
+- ✅ **Logs** : `api_request_logs` + `api_error_logs`
+- ✅ **Admin** : `GET/DELETE /api/admin/external-cache` (lister/purger), `POST /api/admin/external-cache/refresh` (force-refresh)
+- ✅ **Champs profil** : `siren`, `postal_code`, `naf_code`, `siret_verified`, `siret_verified_at` ajoutés à `/profile-v2` (COMPANY_FIELDS)
+- ✅ **Page `/companies`** : recherche par nom/CP/dpt/région/NAF avec pagination + badge "Cache"
+- ✅ **Composant `SiretLookup`** : autocomplete dans `/register` (mode entreprise) + modale d'édition profil entreprise → préremplit nom/SIRET/ville/CP/région/adresse/NAF
+- ✅ **Header** : lien "Entreprises" → /companies
+- ✅ **Bug fix** : nested `<form>` dans SiretLookup (HIGH) — remplacé par `<div>` + `type=button` + `onKeyDown Enter`
+- ✅ Tests : 17/17 backend pass · `/companies` 100% · Register entreprise: 8 picks + préremplissage validé manuellement
+
+
 - ✅ **Mode clair/sombre/auto** : `ThemeContext` + tokens CSS `:root` / `.dark` (bleu nuit pro), overrides Tailwind hardcodés, bouton bascule Header (`theme-toggle`), sélecteur 3 options Settings
 - ✅ **Persistance thème** : localStorage anonyme + `user.theme_preference` via `PATCH /api/me/theme` (light|dark|system)
 - ✅ **Profile views** : `profile_views` collection + log fire-and-forget dans `GET /users/{id}` (dédup 30 min)
