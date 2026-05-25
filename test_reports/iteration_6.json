@@ -1,0 +1,45 @@
+{
+  "summary": "Phase A (Iter7) — Theme preference + Profile views Premium gating + Platform counter (admin override) + extended application statuses. Backend: 14/14 tests passed. Frontend: all 18 verification points passed (Landing/Settings/Dashboard candidate/Dashboard company/Admin). Dark mode toggle works for both anon (theme-toggle-anon) and logged users (theme-toggle); theme persists after reload via /me/theme. Profile-views block visible on candidate AND company dashboards; Premium grant via admin endpoint unlocks viewer list (1 viewer-row rendered for lucas.martin after granting). Admin admin-platform-stats block fully functional (show-counter, use-manual, displayed-count, public-message, save-platform-stats → 'Compteur public mis à jour' toast). Platform counter renders both on landing and dashboards; correctly hidden when show_counter=false. Extended statuses internship_obtained/apprenticeship_obtained/contract_signed all accepted by PATCH /applications/{id}/status and counted by real_obtained_count.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/me/profile-views", "issue": "Returns HTTP 402 for non-premium users (intentional per spec choice b). Note: 402 is non-standard for this UX; consider 403 with payload {requires_premium:true} for better client semantics. Currently the frontend correctly handles 402 via PremiumLock CTA so no functional break."},
+      {"endpoint": "POST /admin/grant-premium/{user_id}", "issue": "Writes is_premium / premium_end_date to user.profile (nested) while several other endpoints read from root user.is_premium. _is_premium() correctly checks both, but two sources of truth are fragile — recommend centralising premium state at user root."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard candidate (light mode)", "issues": ["Top-of-page screenshot shows platform-counter as a small subtle line under greeting — visually low-contrast vs dashboard cards; consider styling it as a colored pill to match landing's 'sparkle + count' badge for consistency."]},
+      {"screen": "Header theme toggle", "issues": ["Theme toggle is a single sun/moon icon that toggles between dark↔light only — does not surface the 'system/auto' option (which is available in /settings). Minor UX inconsistency; intentional likely (3-way picker in settings, 2-way quick toggle in header)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter7_phaseA.py",
+    "/app/test_reports/pytest/pytest_iter7.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Unify is_premium storage (profile vs root) — currently dual-read via _is_premium() works but is fragile.",
+    "OPTIONAL: Reconsider HTTP 402 for premium-gated endpoints (403+payload would be more standard); current code is functional.",
+    "MINOR (design): Make dashboard platform-counter visually stronger (badge styling) to match landing."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 3242 lines — still well past the 700-line threshold flagged in iter5/iter6. Phase A added ~170 lines of theme/profile-views/platform-stats; good opportunity to split into backend/social_proof.py + backend/theme.py.",
+    "PATCH /me/theme accepts a raw dict (line 3074) without Pydantic — same pattern flagged before (PUT /api/cv, PUT /api/profile-v2). Validation is inline (`pref in (...)`) which is OK for a 1-field endpoint but inconsistent with the rest of the API.",
+    "Profile view logging in GET /users/{id} (line 311–332) is fire-and-forget inside the request — if profile_views collection becomes hot, this adds latency to public profile reads. Consider moving to background task via FastAPI BackgroundTasks.",
+    "OBTAINED_STATUSES set is duplicated implicitly between line 1642 (allowed for PATCH) and 3145 (counted by /stats/platform). Extract a single source of truth at module top.",
+    "_is_premium reads from both user root and profile dict — defensive but indicates schema drift; admin grant-premium endpoint should be aligned with the canonical location.",
+    "/admin/platform-stats PUT serialises public_message with [:200] truncation but no Pydantic — acceptable but inconsistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter7_phaseA.py (new — 14 tests covering theme, profile-views, platform-stats, extended statuses)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% on tested flows (Landing counter+anon toggle, Candidate dashboard profile-views Premium, Settings 3-button theme + reload persistence, Admin platform-stats CRUD, Company dashboard with premium-cta lock)"},
+  "test_credentials": "lucas.martin@email.fr/Demo1234! (candidate, granted Premium 30d during test), hr@brightstudio011.fr/Demo1234! (company, NOT premium), admin@stagiaireconnect.fr/Admin123! — from /app/memory/test_credentials.md",
+  "seed_data_creation": "Granted 30-day Premium to lucas.martin@email.fr via POST /admin/grant-premium during testing (persists in user.profile.is_premium + premium_end_date). Toggled platform_stats_settings between manual/auto during admin override test, reverted to auto with default message at end.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase A backend tests live at /app/backend/tests/test_iter7_phaseA.py — run via `pytest /app/backend/tests/test_iter7_phaseA.py -v`. Note: test_grant_premium_then_list_visible idempotently re-grants Premium to lucas.martin (30 days). The profile_views dedup window is 30 min — repeated test runs in same window will not increment counters, but tests are written tolerantly (>= rather than ==).",
+  "rca of the issue": "No bugs found in Phase A scope. All endpoints (PATCH /me/theme, GET /me/profile-views[/stats], GET /stats/platform, GET/PUT /admin/platform-stats, POST /admin/grant-premium, PATCH /applications/{id}/status with extended set) behave per spec. Premium gating returns 402 as designed (frontend correctly maps to PremiumLock CTA). Dark mode CSS variables in :root/.dark verified readable on Landing+Dashboard+Settings — no white-on-white or inverse contrast issues observed."
+}

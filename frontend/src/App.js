@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import "@/App.css";
 
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import Header from "./components/Header";
 
 import LandingPage from "./pages/LandingPage";
@@ -43,12 +44,13 @@ const Protected = ({ children }) => {
 };
 
 function AppRouter() {
+  const { user } = useAuth();
   const location = useLocation();
   if (location.hash?.includes("session_id=")) {
     return <AuthCallback />;
   }
   return (
-    <>
+    <ThemeProvider user={user}>
       <Header />
       <Routes>
         <Route path="/" element={<LandingPage />} />
@@ -80,7 +82,7 @@ function AppRouter() {
         <Route path="/cv" element={<Protected><CVPage /></Protected>} />
         <Route path="/cv/:id" element={<CVPage />} />
       </Routes>
-    </>
+    </ThemeProvider>
   );
 }
 

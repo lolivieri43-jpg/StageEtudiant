@@ -6,11 +6,12 @@
 
 html, body {
   margin: 0;
-  background: #F8FAFC;
-  color: #0F172A;
+  background: var(--sc-bg);
+  color: var(--sc-text);
   font-family: 'Figtree', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 h1, h2, h3, h4, h5 { font-family: 'Outfit', sans-serif; }
@@ -37,6 +38,42 @@ h1, h2, h3, h4, h5 { font-family: 'Outfit', sans-serif; }
     --input: 214 32% 91%;
     --ring: 221 83% 53%;
     --radius: 1rem;
+
+    --sc-bg: #F8FAFC;
+    --sc-surface: #FFFFFF;
+    --sc-surface-2: #F1F5F9;
+    --sc-border: #E2E8F0;
+    --sc-text: #0F172A;
+    --sc-text-muted: #475569;
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
+    --card: 217 33% 17%;
+    --card-foreground: 210 40% 98%;
+    --popover: 217 33% 17%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 252 84% 67%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 25%;
+    --input: 217 33% 25%;
+    --ring: 217 91% 60%;
+
+    --sc-bg: #0F172A;
+    --sc-surface: #1E293B;
+    --sc-surface-2: #334155;
+    --sc-border: #334155;
+    --sc-text: #F1F5F9;
+    --sc-text-muted: #CBD5E1;
   }
 }
 
@@ -50,6 +87,10 @@ h1, h2, h3, h4, h5 { font-family: 'Outfit', sans-serif; }
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+}
+
+.dark .glass {
+  background: rgba(15, 23, 42, 0.78);
 }
 
 .gradient-text {
@@ -66,11 +107,25 @@ h1, h2, h3, h4, h5 { font-family: 'Outfit', sans-serif; }
     radial-gradient(at 70% 50%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
 }
 
+.dark .bg-mesh {
+  background-image:
+    radial-gradient(at 20% 10%, rgba(139, 92, 246, 0.22) 0px, transparent 55%),
+    radial-gradient(at 80% 0%, rgba(37, 99, 235, 0.22) 0px, transparent 55%),
+    radial-gradient(at 70% 50%, rgba(16, 185, 129, 0.16) 0px, transparent 55%);
+}
+
 .card-soft {
-  background: white;
-  border: 1px solid #E2E8F0;
+  background: var(--sc-surface);
+  border: 1px solid var(--sc-border);
   border-radius: 1rem;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+  color: var(--sc-text);
+}
+
+.dark .card-soft {
+  background: var(--sc-surface);
+  border-color: var(--sc-border);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
 }
 
 button, a { transition: all 200ms ease-out; }
@@ -81,6 +136,8 @@ button, a { transition: all 200ms ease-out; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+.dark ::-webkit-scrollbar-thumb { background: #475569; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #64748B; }
 
 .region-path {
   fill: #DBEAFE;
@@ -91,6 +148,55 @@ button, a { transition: all 200ms ease-out; }
 }
 .region-path:hover { fill: #8B5CF6; }
 .region-path.active { fill: #2563EB; }
+.dark .region-path { fill: #1E40AF; stroke: #0F172A; }
+.dark .region-path:hover { fill: #8B5CF6; }
+.dark .region-path.active { fill: #3B82F6; }
+
+/* === Dark mode overrides for hardcoded Tailwind utilities ===
+   StageConnect uses many `bg-slate-*`, `text-slate-*`, `border-slate-*` hardcoded
+   classes. To avoid touching dozens of components we remap them under `.dark`. */
+.dark .bg-white { background-color: var(--sc-surface) !important; }
+.dark .bg-slate-50 { background-color: var(--sc-bg) !important; }
+.dark .bg-slate-100 { background-color: var(--sc-surface) !important; }
+.dark .bg-slate-200\/70 { background-color: rgba(51, 65, 85, 0.7) !important; }
+.dark .hover\:bg-slate-100:hover { background-color: var(--sc-surface-2) !important; }
+.dark .hover\:bg-slate-200\/70:hover { background-color: rgba(71, 85, 105, 0.6) !important; }
+.dark .focus\:bg-white:focus { background-color: var(--sc-surface-2) !important; }
+
+.dark .text-slate-900 { color: var(--sc-text) !important; }
+.dark .text-slate-800 { color: var(--sc-text) !important; }
+.dark .text-slate-700 { color: var(--sc-text-muted) !important; }
+.dark .text-slate-600 { color: var(--sc-text-muted) !important; }
+.dark .text-slate-500 { color: #94A3B8 !important; }
+.dark .text-slate-400 { color: #64748B !important; }
+
+.dark .border-slate-100 { border-color: var(--sc-border) !important; }
+.dark .border-slate-200 { border-color: var(--sc-border) !important; }
+.dark .border-slate-200\/70 { border-color: rgba(51, 65, 85, 0.7) !important; }
+
+/* Soft tint badges (Tailwind bg-*-50 / text-*-700) — keep visible in dark */
+.dark .bg-blue-50 { background-color: rgba(37, 99, 235, 0.18) !important; }
+.dark .bg-violet-50 { background-color: rgba(139, 92, 246, 0.18) !important; }
+.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.18) !important; }
+.dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.18) !important; }
+.dark .bg-rose-50 { background-color: rgba(244, 63, 94, 0.18) !important; }
+.dark .text-blue-700 { color: #93C5FD !important; }
+.dark .text-violet-700 { color: #C4B5FD !important; }
+.dark .text-emerald-700 { color: #6EE7B7 !important; }
+.dark .text-amber-700 { color: #FCD34D !important; }
+.dark .text-rose-700 { color: #FCA5A5 !important; }
+
+/* Inputs */
+.dark input, .dark select, .dark textarea {
+  background-color: var(--sc-surface);
+  color: var(--sc-text);
+  border-color: var(--sc-border);
+}
+.dark input::placeholder, .dark textarea::placeholder { color: #64748B; }
+
+/* Shadow tweaks for dark mode */
+.dark .shadow-md { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important; }
+.dark .shadow-lg { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important; }
 
 @layer base {
   [data-debug-wrapper="true"] { display: contents !important; }

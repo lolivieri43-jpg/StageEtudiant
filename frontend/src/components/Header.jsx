@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag } from "lucide-react";
+import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag, Sun, Moon } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import api from "../lib/api";
 import { Button } from "./ui/button";
 import {
@@ -15,6 +16,7 @@ import {
 
 export default function Header() {
   const { user, logout } = useAuth();
+  const { effective, toggle } = useTheme() || {};
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
   const [q, setQ] = useState("");
@@ -63,6 +65,15 @@ export default function Header() {
 
         {user ? (
           <nav className="flex items-center gap-1">
+            <button
+              onClick={toggle}
+              className="hidden sm:flex flex-col items-center px-2.5 py-1 text-slate-600 hover:text-blue-600"
+              title={effective === "dark" ? "Mode clair" : "Mode sombre"}
+              data-testid="theme-toggle"
+            >
+              {effective === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              <span className="text-[10px] font-medium">Thème</span>
+            </button>
             <Link to="/feed" className="hidden md:flex flex-col items-center px-3 py-1 text-slate-600 hover:text-blue-600" data-testid="nav-feed">
               <Newspaper className="w-5 h-5" />
               <span className="text-[10px] font-medium">Actualités</span>
@@ -114,6 +125,9 @@ export default function Header() {
           </nav>
         ) : (
           <div className="flex items-center gap-2">
+            <button onClick={toggle} className="p-2 text-slate-600 hover:text-blue-600" title={effective === "dark" ? "Mode clair" : "Mode sombre"} data-testid="theme-toggle-anon">
+              {effective === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
             <Link to="/login" data-testid="header-login-link"><Button variant="ghost" className="rounded-full">Se connecter</Button></Link>
             <Link to="/register" data-testid="header-register-link">
               <Button className="rounded-full bg-blue-600 hover:bg-blue-700">S'inscrire</Button>

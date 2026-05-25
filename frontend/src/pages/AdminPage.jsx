@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 import { CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -9,11 +11,13 @@ export default function AdminPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
+  const [platform, setPlatform] = useState(null);
 
   useEffect(() => {
     if (user?.role !== "admin") return;
     api.get("/admin/stats").then((r) => setStats(r.data));
     api.get("/admin/users").then((r) => setUsers(r.data));
+    api.get("/admin/platform-stats").then((r) => setPlatform(r.data));
   }, [user]);
 
   if (!user || user.role !== "admin") {
@@ -32,6 +36,20 @@ export default function AdminPage() {
     const r = await api.get("/admin/users"); setUsers(r.data);
   };
 
+  const savePlatform = async () => {
+    try {
+      const { data } = await api.put("/admin/platform-stats", {
+        displayed_obtained_count: parseInt(platform.displayed_obtained_count, 10) || 0,
+        use_manual_count: !!platform.use_manual_count,
+        public_message: platform.public_message,
+        show_counter: !!platform.show_counter,
+      });
+      setPlatform({ ...platform, ...data });
+      toast.success("Compteur public mis à jour");
+    } catch {
+      toast.error("Erreur");
+    }
+  };
 
   return (
     <div className="min-h-screen pt-20 pb-12 bg-slate-50">
@@ -47,6 +65,60 @@ export default function AdminPage() {
             ))}
           </div>
         )}
+
+        {platform && (
+          <div className="card-soft p-6 mb-6" data-testid="admin-platform-stats">
+            <h2 className="font-bold mb-1">Preuve sociale — Compteur "stages obtenus"</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Compteur réel (auto) : <strong>{platform.real_obtained_count}</strong>{" "}
+              candidatures avec statut <code className="bg-slate-100 rounded px-1 text-[11px]">acceptee / internship_obtained / apprenticeship_obtained / contract_signed</code>.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="show_counter"
+                  checked={!!platform.show_counter}
+                  onChange={(e) => setPlatform({ ...platform, show_counter: e.target.checked })}
+                  data-testid="show-counter"
+                />
+                <Label htmlFor="show_counter">Afficher le compteur publiquement</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="use_manual"
+                  checked={!!platform.use_manual_count}
+                  onChange={(e) => setPlatform({ ...platform, use_manual_count: e.target.checked })}
+                  data-testid="use-manual"
+                />
+                <Label htmlFor="use_manual">Surcharger avec une valeur marketing</Label>
+              </div>
+              <div>
+                <Label>Valeur affichée (marketing)</Label>
+                <Input
+                  type="number"
+                  value={platform.displayed_obtained_count || 0}
+                  onChange={(e) => setPlatform({ ...platform, displayed_obtained_count: e.target.value })}
+                  className="rounded-xl mt-1"
+                  data-testid="displayed-count"
+                  disabled={!platform.use_manual_count}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label>Message public</Label>
+                <Input
+                  value={platform.public_message || ""}
+                  onChange={(e) => setPlatform({ ...platform, public_message: e.target.value })}
+                  className="rounded-xl mt-1"
+                  data-testid="public-message"
+                />
+              </div>
+            </div>
+            <Button onClick={savePlatform} className="rounded-full bg-blue-600 hover:bg-blue-700 mt-4" data-testid="save-platform-stats">Enregistrer</Button>
+          </div>
+        )}
+
         <div className="card-soft p-6">
           <h2 className="font-bold mb-4">Utilisateurs ({users.length})</h2>
           <div className="overflow-x-auto">

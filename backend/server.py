@@ -304,10 +304,32 @@ async def update_profile(data: dict, user=Depends(get_current_user)):
     return updated
 
 @api.get("/users/{user_id}")
-async def get_user_public(user_id: str):
+async def get_user_public(user_id: str, viewer=Depends(get_optional_user)):
     u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password": 0})
     if not u:
         raise HTTPException(404, "Utilisateur introuvable")
+    # Log a profile view (Phase A — a2). Dedupe: 1 view per (viewer,viewed) per 30 minutes.
+    if viewer and viewer["user_id"] != user_id:
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+            recent = await db.profile_views.find_one({
+                "viewer_user_id": viewer["user_id"],
+                "viewed_user_id": user_id,
+                "viewed_at": {"$gte": cutoff},
+            })
+            if not recent:
+                await db.profile_views.insert_one({
+                    "view_id": f"pv_{uuid.uuid4().hex[:12]}",
+                    "viewer_user_id": viewer["user_id"],
+                    "viewer_name": viewer.get("name"),
+                    "viewer_avatar": viewer.get("profile", {}).get("avatar") or viewer.get("profile", {}).get("logo"),
+                    "viewer_role": viewer.get("role"),
+                    "viewed_user_id": user_id,
+                    "viewed_role": u.get("role"),
+                    "viewed_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as e:
+            logger.warning(f"profile_view log failed: {e}")
     return u
 
 @api.get("/users")
@@ -1617,7 +1639,8 @@ async def set_application_status(app_id: str, body: dict, user=Depends(get_curre
     if a["company_id"] != user["user_id"] and user["role"] != "admin":
         raise HTTPException(403, "Interdit")
     status = body.get("status")
-    allowed = {"vue", "en_analyse", "entretien_propose", "acceptee", "refusee", "archivee"}
+    allowed = {"vue", "en_analyse", "entretien_propose", "acceptee", "refusee", "archivee",
+               "internship_obtained", "apprenticeship_obtained", "contract_signed"}
     if status not in allowed:
         raise HTTPException(400, "Statut invalide")
     await db.applications.update_one({"app_id": app_id}, {"$set": {"status": status}})
@@ -2369,6 +2392,9 @@ async def ensure_indexes():
         await db.deals.create_index([("status", 1)])
         await db.deals.create_index([("author_id", 1)])
         await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+        await db.profile_views.create_index([("viewed_user_id", 1), ("viewed_at", -1)])
+        await db.profile_views.create_index([("viewer_user_id", 1), ("viewed_user_id", 1), ("viewed_at", -1)])
+        await db.platform_stats_settings.create_index([("key", 1)], unique=True)
         logger.info("Mongo indexes ensured")
     except Exception as e:
         logger.warning(f"Index creation failed: {e}")
@@ -3041,6 +3067,135 @@ async def cv_ai(action: str, body: dict, user=Depends(get_current_user)):
         raise HTTPException(500, "Erreur IA. Réessayez.")
     return {"suggestion": result}
 
+
+# ============ ITERATION 7: THEME PREFERENCE + PROFILE VIEWS + PLATFORM STATS ============
+
+@api.patch("/me/theme")
+async def update_my_theme(body: dict, user=Depends(get_current_user)):
+    pref = body.get("theme_preference")
+    if pref not in ("light", "dark", "system"):
+        raise HTTPException(400, "Valeur invalide (light, dark, system)")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"theme_preference": pref}})
+    return {"ok": True, "theme_preference": pref}
+
+
+def _is_premium(user: dict) -> bool:
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    p = user.get("profile") or {}
+    is_p = user.get("is_premium") or p.get("is_premium")
+    if not is_p:
+        return False
+    end = user.get("premium_end_date") or p.get("premium_end_date")
+    if not end:
+        return True
+    try:
+        return datetime.fromisoformat(str(end).replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    except Exception:
+        return bool(is_p)
+
+
+@api.get("/me/profile-views/stats")
+async def my_profile_view_stats(user=Depends(get_current_user)):
+    """Aggregated view counts for the current user (Free + Premium see this)."""
+    now = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).isoformat()
+    month_ago = (now - timedelta(days=30)).isoformat()
+    total = await db.profile_views.count_documents({"viewed_user_id": user["user_id"]})
+    week = await db.profile_views.count_documents({"viewed_user_id": user["user_id"], "viewed_at": {"$gte": week_ago}})
+    month = await db.profile_views.count_documents({"viewed_user_id": user["user_id"], "viewed_at": {"$gte": month_ago}})
+    # Count distinct viewers
+    distinct = await db.profile_views.distinct("viewer_user_id", {"viewed_user_id": user["user_id"]})
+    return {
+        "total": total,
+        "week": week,
+        "month": month,
+        "distinct_viewers": len(distinct),
+        "is_premium": _is_premium(user),
+    }
+
+
+@api.get("/me/profile-views")
+async def my_profile_views_list(limit: int = 30, user=Depends(get_current_user)):
+    """Detail list — Premium only (per user choice b: free=nothing, premium=all)."""
+    if not _is_premium(user):
+        raise HTTPException(402, "Réservé aux profils Premium")
+    docs = await db.profile_views.find(
+        {"viewed_user_id": user["user_id"]}, {"_id": 0}
+    ).sort("viewed_at", -1).limit(limit).to_list(limit)
+    # Enrich with current viewer info (in case avatar/name changed)
+    out = []
+    for d in docs:
+        v = await db.users.find_one({"user_id": d.get("viewer_user_id")}, {"_id": 0, "password": 0, "email": 0})
+        out.append({
+            "view_id": d.get("view_id"),
+            "viewer_user_id": d.get("viewer_user_id"),
+            "viewer_name": v.get("name") if v else d.get("viewer_name"),
+            "viewer_role": v.get("role") if v else d.get("viewer_role"),
+            "viewer_avatar": (v.get("profile", {}).get("avatar") or v.get("profile", {}).get("logo")) if v else d.get("viewer_avatar"),
+            "viewer_title": (v.get("profile", {}).get("title") or v.get("profile", {}).get("sector")) if v else None,
+            "viewed_at": d.get("viewed_at"),
+        })
+    return out
+
+
+# ===== Platform-wide social proof =====
+OBTAINED_STATUSES = {"acceptee", "internship_obtained", "apprenticeship_obtained", "contract_signed"}
+
+
+@api.get("/stats/platform")
+async def platform_stats():
+    """Public counter used for social proof on landing + dashboards."""
+    settings = await db.platform_stats_settings.find_one({"key": "main"}, {"_id": 0}) or {}
+    real_count = await db.applications.count_documents({"status": {"$in": list(OBTAINED_STATUSES)}})
+    use_manual = settings.get("use_manual_count", False)
+    displayed = settings.get("displayed_obtained_count", 0) if use_manual else real_count
+    return {
+        "real_obtained_count": real_count,
+        "displayed_obtained_count": displayed,
+        "use_manual_count": bool(use_manual),
+        "public_message": settings.get("public_message") or "étudiants ont trouvé un stage ou une alternance via StageConnect",
+        "show_counter": settings.get("show_counter", True),
+        "total_companies": await db.users.count_documents({"role": "company"}),
+        "total_candidates": await db.users.count_documents({"role": "candidate"}),
+        "total_offers": await db.offers.count_documents({}),
+    }
+
+
+@api.get("/admin/platform-stats")
+async def admin_platform_stats(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Réservé aux admins")
+    settings = await db.platform_stats_settings.find_one({"key": "main"}, {"_id": 0}) or {
+        "key": "main",
+        "displayed_obtained_count": 0,
+        "use_manual_count": False,
+        "public_message": "étudiants ont trouvé un stage ou une alternance via StageConnect",
+        "show_counter": True,
+    }
+    real_count = await db.applications.count_documents({"status": {"$in": list(OBTAINED_STATUSES)}})
+    return {**settings, "real_obtained_count": real_count}
+
+
+@api.put("/admin/platform-stats")
+async def admin_set_platform_stats(body: dict, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Réservé aux admins")
+    update = {
+        "displayed_obtained_count": int(body.get("displayed_obtained_count", 0)),
+        "use_manual_count": bool(body.get("use_manual_count", False)),
+        "public_message": str(body.get("public_message") or "étudiants ont trouvé un stage ou une alternance via StageConnect")[:200],
+        "show_counter": bool(body.get("show_counter", True)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.platform_stats_settings.update_one(
+        {"key": "main"},
+        {"$set": update, "$setOnInsert": {"key": "main"}},
+        upsert=True,
+    )
+    return {"ok": True, **update}
 
 
 app.include_router(api)

@@ -6,6 +6,8 @@ import { Briefcase, Users, Mail, Eye, FileText, TrendingUp, Plus, CheckCircle2 }
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import OfferCard from "../components/OfferCard";
+import ProfileViews from "../components/ProfileViews";
+import PlatformCounter from "../components/PlatformCounter";
 
 const StatusBadge = ({ status }) => {
   const map = {
@@ -50,6 +52,7 @@ export default function DashboardPage() {
 
         {user.role === "company" ? (
           <>
+            <div className="mb-5"><PlatformCounter variant="compact" /></div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
               <StatCard icon={Briefcase} color="blue" label="Offres publiées" value={data?.offers_count ?? 0} />
               <StatCard icon={Users} color="violet" label="Candidatures reçues" value={data?.applications_count ?? 0} />
@@ -81,9 +84,11 @@ export default function DashboardPage() {
                 </div>
               </Section>
             </div>
+            <div className="mt-6"><ProfileViews /></div>
           </>
         ) : (
           <>
+            <div className="mb-5"><PlatformCounter variant="compact" /></div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
               <StatCard icon={FileText} color="blue" label="Candidatures envoyées" value={data?.applications_count ?? 0} />
               <StatCard icon={TrendingUp} color="violet" label="En cours" value={data?.pending ?? 0} />
@@ -112,6 +117,7 @@ export default function DashboardPage() {
                 </div>
               </Section>
             </div>
+            <div className="mt-6"><ProfileViews /></div>
           </>
         )}
       </div>

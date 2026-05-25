@@ -4,6 +4,7 @@ import { Search, ArrowRight, CheckCircle2, Sparkles, TrendingUp, Users, Briefcas
 import { Button } from "../components/ui/button";
 import FranceMap from "../components/FranceMap";
 import OfferCard from "../components/OfferCard";
+import PlatformCounter from "../components/PlatformCounter";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -102,6 +103,8 @@ export default function LandingPage() {
               <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500" />Offres vérifiées</div>
               <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500" />100% gratuit pour les candidats</div>
             </div>
+
+            <div className="mt-4"><PlatformCounter variant="compact" /></div>
 
             {!user && (
               <div className="mt-8 flex flex-wrap gap-3">
