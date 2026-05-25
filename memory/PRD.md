@@ -25,7 +25,21 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
-## Iteration 5 (2026-02) — Photos PC, Premium, Bug fixes, Indexes
+## Iteration 6 (2026-02) — CV en ligne, candidature enrichie, 5 modèles PDF
+- ✅ **CV en ligne CRUD** : `/api/cv` (GET/PUT) + `/api/users/{id}/cv` (lecture publique selon visibilité public/connected/after_application/private)
+- ✅ **5 modèles PDF distincts** : Moderne (bleu, 1 col), Classique (Times serif centré + divider), Étudiant (bannière colorée + chips), Alternance (violet 2 colonnes), Professionnel (sidebar sombre)
+- ✅ **Modèle par défaut** : `pdf_template` sauvegardé dans le profil CV + sélecteur à l'export (CVPage, modale de candidature, ApplicationDetailPage)
+- ✅ **Robustesse PDF** : `_norm_skills()` accepte skills sous forme str OU dict {name,level} — pas de 500 sur PDF
+- ✅ **IA CV (Emergent LLM)** : `/api/cv/ai/{improve,rephrase,correct,summary,skills,cover_letter,adapt}`
+- ✅ **Candidature enrichie** : POST `/applications` accepte `use_online_cv`, `online_cv_template`, `uploaded_doc_ids` ; stocke `online_cv_snapshot` figé + `selected_documents`
+- ✅ **Vue entreprise** : `/applications/{id}/cv` et `/applications/{id}/cv/export` (PDF) — accessible candidat + entreprise propriétaire + admin, 403 sinon
+- ✅ **Frontend** : ApplicationDetailPage affiche un bloc "CV en ligne du candidat" avec preview HTML + bouton "Télécharger PDF" + lien "Plein écran" (/cv/{id})
+- ✅ **Modale candidature** : checkbox CV en ligne + sélecteur modèle + cases à cocher pour les documents uploadés (CV, lettre, convention, etc.) + lettre de motivation
+- ✅ **ProfilePage** : bouton "Mon CV en ligne" (owner) / "Voir le CV en ligne" (visiteur si CV accessible)
+- ✅ **Header** : entrée "Mon CV en ligne" dans le menu utilisateur candidate
+- ✅ Tests backend : 21/22 pass (1 skipped par manque de fixture, pas un bug code)
+
+
 - ✅ **Carte interactive France retirée** (remplacée par chips de régions avec compteurs d'offres)
 - ✅ **Upload photo de profil** (`/api/me/avatar`) avec compression Pillow auto à 512×512 JPEG q85, formats acceptés JPG/PNG/WebP
 - ✅ **Upload bannière** (`/api/me/banner`) compression à 1600×600 JPEG q82

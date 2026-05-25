@@ -2553,6 +2553,20 @@ def _cv_color_palette(template: str):
     return rl_colors.HexColor(accent), rl_colors.HexColor(secondary), rl_colors.HexColor(text), rl_colors.HexColor(muted)
 
 
+def _norm_skills(skills):
+    """Skills may be stored as strings or {name,level} dicts; always return a flat list of strings."""
+    out = []
+    for s in (skills or []):
+        if isinstance(s, str):
+            if s.strip(): out.append(s.strip())
+        elif isinstance(s, dict):
+            v = s.get("name") or s.get("label") or s.get("value")
+            if v: out.append(str(v))
+        else:
+            out.append(str(s))
+    return out
+
+
 def _hex(c):
     """ReportLab HexColor → '#rrggbb' for inline HTML."""
     return "#" + c.hexval()[2:]
@@ -2570,7 +2584,7 @@ def _build_sidebar_blocks(cv: dict, body, item_sub, accent, secondary, dark_bg=F
 
     if cv.get("skills"):
         blocks.append(Paragraph("COMPÉTENCES", sec_title))
-        for s in cv["skills"]:
+        for s in _norm_skills(cv["skills"]):
             blocks.append(Paragraph(f"• {s}", body))
     if cv.get("languages"):
         blocks.append(Paragraph("LANGUES", sec_title))
@@ -2634,7 +2648,7 @@ def build_cv_pdf(user: dict, cv: dict, template: str = "modern") -> bytes:
             ("Profil", lambda: [Paragraph(cv["summary"], body)] if cv.get("summary") else []),
             ("Expériences", lambda: _exp_block(cv, item_title, item_sub, body)),
             ("Formation", lambda: _edu_block(cv, item_title, item_sub, body)),
-            ("Compétences", lambda: [Paragraph(" · ".join(cv["skills"]), body)] if cv.get("skills") else []),
+            ("Compétences", lambda: [Paragraph(" · ".join(_norm_skills(cv["skills"])), body)] if cv.get("skills") else []),
             ("Langues", lambda: _lang_block(cv, body)),
             ("Projets", lambda: _proj_block(cv, item_title, item_sub, body)),
             ("Certifications", lambda: _cert_block(cv, item_title, item_sub)),
@@ -2684,7 +2698,7 @@ def build_cv_pdf(user: dict, cv: dict, template: str = "modern") -> bytes:
         if cv.get("skills"):
             elements.append(Paragraph("⚡ Compétences", section_style))
             # Skill chips as Paragraphs
-            chips = " ".join([f'<font color="white" backColor="{_hex(accent)}"> {s} </font>' for s in cv["skills"]])
+            chips = " ".join([f'<font color="white" backColor="{_hex(accent)}"> {s} </font>' for s in _norm_skills(cv["skills"])])
             elements.append(Paragraph(chips, body))
         if cv.get("languages"):
             elements.append(Paragraph("🌐 Langues", section_style))
@@ -2788,7 +2802,7 @@ def build_cv_pdf(user: dict, cv: dict, template: str = "modern") -> bytes:
             sidebar.append(Paragraph(b, sb_body))
         if cv.get("skills"):
             sidebar.append(Paragraph("COMPÉTENCES", sb_section))
-            for s in cv["skills"]:
+            for s in _norm_skills(cv["skills"]):
                 sidebar.append(Paragraph(f"• {s}", sb_body))
         if cv.get("languages"):
             sidebar.append(Paragraph("LANGUES", sb_section))
@@ -2847,7 +2861,7 @@ def build_cv_pdf(user: dict, cv: dict, template: str = "modern") -> bytes:
         elements.extend(_edu_block(cv, item_title, item_sub, body))
     if cv.get("skills"):
         elements.append(Paragraph("Compétences", section_style))
-        elements.append(Paragraph(" · ".join(cv["skills"]), body))
+        elements.append(Paragraph(" · ".join(_norm_skills(cv["skills"])), body))
     if cv.get("languages"):
         elements.append(Paragraph("Langues", section_style))
         elements.extend(_lang_block(cv, body))
