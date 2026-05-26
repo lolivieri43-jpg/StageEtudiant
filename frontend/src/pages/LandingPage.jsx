@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import FranceMap from "../components/FranceMap";
 import OfferCard from "../components/OfferCard";
 import PlatformCounter from "../components/PlatformCounter";
+import AISearchBar from "../components/AISearchBar";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -97,6 +98,10 @@ export default function LandingPage() {
                 Rechercher <ArrowRight className="w-4 h-4 ml-1" />
               </Button>
             </form>
+
+            <div className="mt-6">
+              <AISearchBar />
+            </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-slate-600">
               <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500" />+1200 entreprises</div>

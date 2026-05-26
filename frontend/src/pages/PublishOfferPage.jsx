@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { DIPLOMA_LEVELS } from "../lib/diplomas";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
@@ -76,7 +77,7 @@ export default function PublishOfferPage() {
             <div>
               <Label>Niveau</Label>
               <select data-testid="offer-level" value={form.level} onChange={set("level")} className="w-full rounded-xl border border-slate-200 h-10 px-3 mt-1">
-                <option>Bac+2</option><option>Bac+3</option><option>Bac+5</option>
+                {DIPLOMA_LEVELS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
             <div>

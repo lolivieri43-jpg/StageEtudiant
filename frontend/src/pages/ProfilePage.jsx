@@ -12,6 +12,7 @@ import { Textarea } from "../components/ui/textarea";
 import OfferCard from "../components/OfferCard";
 import FileUploader from "../components/FileUploader";
 import SiretLookup from "../components/SiretLookup";
+import { DIPLOMA_LEVELS } from "../lib/diplomas";
 import { toast } from "sonner";
 
 const STUDENT_STATUS = {
@@ -373,7 +374,13 @@ export default function ProfilePage() {
               <>
                 <Field label="Titre professionnel" value={form.title} onChange={(v) => setForm({ ...form, title: v })} testid="edit-title" />
                 <Field label="École" value={form.school} onChange={(v) => setForm({ ...form, school: v })} />
-                <Field label="Niveau" value={form.level} onChange={(v) => setForm({ ...form, level: v })} />
+                <div>
+                  <Label>Niveau de diplôme</Label>
+                  <select value={form.level || ""} onChange={(e) => setForm({ ...form, level: e.target.value })} className="w-full rounded-xl border border-slate-200 h-10 px-3 mt-1" data-testid="edit-level">
+                    <option value="">Choisir un niveau</option>
+                    {DIPLOMA_LEVELS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
                 <Field label="Domaine" value={form.domain} onChange={(v) => setForm({ ...form, domain: v })} />
                 <Field label="Ville" value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
                 <Field label="LinkedIn URL" value={form.linkedin_url} onChange={(v) => setForm({ ...form, linkedin_url: v })} />

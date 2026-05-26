@@ -388,7 +388,10 @@ async def list_offers(
     if remote is not None: query["remote"] = remote
     if company_id: query["company_id"] = company_id
     if source: query["source"] = source
-    offers = await db.offers.find(query, {"_id": 0}).sort("created_at", -1).limit(min(limit, 500)).to_list(min(limit, 500))
+    # Phase F: never show demo offers in production listings
+    query["is_demo"] = {"$ne": True}
+    # Sort: source_priority DESC (StageEtudiant first), then date DESC
+    offers = await db.offers.find(query, {"_id": 0}).sort([("source_priority", -1), ("created_at", -1)]).limit(min(limit, 500)).to_list(min(limit, 500))
     return offers
 
 @api.get("/offers/regions")
@@ -3473,7 +3476,7 @@ async def ai_spontaneous_message(body: dict, user=Depends(get_current_user)):
 
 # ---------- Phase D: AI natural-language search + search history ----------
 @phase_api.post("/ai/search")
-async def ai_search(body: dict, user=Depends(get_current_user)):
+async def ai_search(body: dict, user=Depends(get_optional_user)):
     """Extract structured search criteria from a natural-language query."""
     text = (body.get("query") or "").strip()
     if not text:
@@ -3500,8 +3503,8 @@ async def ai_search(body: dict, user=Depends(get_current_user)):
     try:
         await db.ai_search_logs.insert_one({
             "log_id": f"ai_{uuid.uuid4().hex[:10]}",
-            "user_id": user["user_id"],
-            "user_role": user.get("role"),
+            "user_id": user["user_id"] if user else None,
+            "user_role": (user or {}).get("role"),
             "query_text": text,
             "criteria": criteria,
             "raw": (raw or "")[:1000],
@@ -3736,6 +3739,186 @@ async def admin_clear_ft_cache(user=Depends(get_current_user)):
 
 
 app.include_router(ft_api)
+
+
+# ============ ITERATION 12: External Sources Aggregator + Diploma Levels + Cleanup ============
+from external_sources import (
+    fetch_all_keyless,
+    fetch_ashby, fetch_arbeitnow, fetch_remotive, fetch_remoteok, fetch_jobicy, fetch_greenhouse,
+)
+
+ext_offers_api = APIRouter(prefix="/api")
+
+DIPLOMA_LEVELS = [
+    "Sans diplôme requis",
+    "Collège",
+    "Stage de 3e",
+    "CAP",
+    "BEP",
+    "Bac général",
+    "Bac technologique",
+    "Bac professionnel",
+    "Mention complémentaire",
+    "BP",
+    "BMA",
+    "Bac +1",
+    "BTS",
+    "BTSA",
+    "DUT",
+    "BUT",
+    "DEUST",
+    "Licence",
+    "Licence professionnelle",
+    "Bachelor",
+    "Bac +2",
+    "Bac +3",
+    "Bac +4",
+    "Master 1",
+    "Master 2",
+    "Bac +5",
+    "Diplôme d'ingénieur",
+    "MBA",
+    "Mastère spécialisé",
+    "Doctorat",
+    "Reconversion professionnelle",
+    "Formation courte",
+    "Formation adulte",
+]
+
+
+@ext_offers_api.get("/diploma-levels")
+async def diploma_levels():
+    return {"levels": DIPLOMA_LEVELS}
+
+
+SOURCE_PRIORITY = {
+    "StageConnect": 10, "StageEtudiant": 10,
+    "FranceTravail": 8, "La Bonne Alternance": 8,
+    "Ashby": 5, "Greenhouse": 5,
+    "Adzuna": 5, "Jooble": 5,
+    "Arbeitnow": 4, "Remotive": 4, "RemoteOK": 4, "Jobicy": 4,
+    "EURES": 4,
+}
+
+
+def _compute_priority(o: dict) -> int:
+    return SOURCE_PRIORITY.get(o.get("source"), 1) + (10 if not o.get("is_external") else 0)
+
+
+@ext_offers_api.get("/external-offers/keyless")
+async def get_keyless_offers(force_refresh: bool = False):
+    return await fetch_all_keyless(db, force_refresh=force_refresh)
+
+
+@ext_offers_api.post("/admin/ashby-boards")
+async def add_ashby_board(body: dict, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    token = (body.get("board_token") or "").strip()
+    if not token:
+        raise HTTPException(400, "board_token requis")
+    doc = {
+        "board_token": token,
+        "company_name": body.get("company_name") or token,
+        "active": bool(body.get("active", True)),
+        "added_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.ashby_boards.update_one({"board_token": token}, {"$set": doc}, upsert=True)
+    return doc
+
+
+@ext_offers_api.get("/admin/ashby-boards")
+async def list_ashby_boards(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    return await db.ashby_boards.find({}, {"_id": 0}).to_list(100)
+
+
+@ext_offers_api.delete("/admin/ashby-boards/{token}")
+async def del_ashby_board(token: str, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    r = await db.ashby_boards.delete_one({"board_token": token})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@ext_offers_api.post("/admin/greenhouse-boards")
+async def add_gh_board(body: dict, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    token = (body.get("board_token") or "").strip()
+    if not token:
+        raise HTTPException(400, "board_token requis")
+    doc = {
+        "board_token": token,
+        "company_name": body.get("company_name") or token,
+        "active": bool(body.get("active", True)),
+        "added_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.greenhouse_boards.update_one({"board_token": token}, {"$set": doc}, upsert=True)
+    return doc
+
+
+@ext_offers_api.get("/admin/greenhouse-boards")
+async def list_gh_boards(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    return await db.greenhouse_boards.find({}, {"_id": 0}).to_list(100)
+
+
+@ext_offers_api.delete("/admin/greenhouse-boards/{token}")
+async def del_gh_board(token: str, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    r = await db.greenhouse_boards.delete_one({"board_token": token})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@ext_offers_api.delete("/admin/external-offers-cache")
+async def del_ext_offers_cache(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    r = await db.external_offers_cache.delete_many({})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@ext_offers_api.get("/admin/external-sources-status")
+async def external_sources_status(user=Depends(get_current_user)):
+    """Returns each source state: active flag (env), last fetch, errors, offer count in cache."""
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin only")
+    cache_doc = await db.external_offers_cache.find_one({"key": "keyless_all"}, {"_id": 0}) or {}
+    sources = []
+    for name in ["Ashby", "Arbeitnow", "Remotive", "RemoteOK", "Jobicy", "Greenhouse",
+                 "FranceTravail", "La Bonne Alternance", "Adzuna", "Jooble", "EURES"]:
+        recent = await db.api_request_logs.find_one(
+            {"api_name": {"$regex": name.lower().replace(" ", "")}}, {"_id": 0}, sort=[("created_at", -1)]
+        )
+        recent_err = await db.api_error_logs.find_one(
+            {"api_name": {"$regex": name.lower().replace(" ", "")}}, {"_id": 0}, sort=[("created_at", -1)]
+        )
+        env_key = f"ENABLE_{name.upper().replace(' ', '_')}"
+        sources.append({
+            "name": name,
+            "enabled": os.environ.get(env_key, "true").lower() in ("true", "1", "yes"),
+            "last_call": (recent or {}).get("created_at"),
+            "last_status": (recent or {}).get("status"),
+            "last_error_at": (recent_err or {}).get("created_at"),
+            "last_error": (recent_err or {}).get("error"),
+            "cached_count": cache_doc.get("by_source", {}).get(name, 0),
+            "requires_key": name in ("Adzuna", "Jooble", "EURES"),
+        })
+    return {
+        "sources": sources,
+        "cache": {
+            "cached_at": cache_doc.get("cached_at"),
+            "expires_at": cache_doc.get("expires_at"),
+            "total_offers": len(cache_doc.get("results", [])),
+        },
+    }
+
+
+app.include_router(ext_offers_api)
 
 app.add_middleware(
     CORSMiddleware,

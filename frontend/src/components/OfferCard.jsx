@@ -5,11 +5,12 @@ import { Badge } from "./ui/badge";
 
 const SOURCE_LABELS = {
   StageConnect: "StageEtudiant",
+  StageEtudiant: "StageEtudiant",
   HelloWork: "HelloWork",
   LinkedIn: "LinkedIn",
   Indeed: "Indeed",
   WelcomeToTheJungle: "WTTJ",
-  FranceTravail: "France Travail ✓",
+  FranceTravail: "France Travail",
   JobTeaser: "JobTeaser",
   StudentJob: "StudentJob",
   LEtudiant: "L'Étudiant",
@@ -18,6 +19,15 @@ const SOURCE_LABELS = {
   Monster: "Monster",
   TalentCom: "Talent.com",
   "La Bonne Alternance": "LBA",
+  Ashby: "Ashby",
+  Arbeitnow: "Arbeitnow",
+  Remotive: "Remotive",
+  RemoteOK: "RemoteOK",
+  Jobicy: "Jobicy",
+  Greenhouse: "Greenhouse",
+  Adzuna: "Adzuna",
+  Jooble: "Jooble",
+  EURES: "EURES",
 };
 
 export default function OfferCard({ offer }) {
@@ -26,8 +36,8 @@ export default function OfferCard({ offer }) {
   const sourceLabel = SOURCE_LABELS[offer.source] || offer.source || "StageEtudiant";
   const inner = (
     <>
-      <div className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shadow-sm" data-testid={`source-badge-${offer.offer_id}`}>
-        {sourceLabel}
+      <div className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full shadow-sm" data-testid={`source-badge-${offer.offer_id}`} title={`Source: ${sourceLabel}`}>
+        Origine : {sourceLabel}
       </div>
       <div className="flex items-start gap-4">
         <div className="w-12 h-12 rounded-xl bg-slate-100 overflow-hidden shrink-0 grid place-items-center text-slate-400 font-bold">

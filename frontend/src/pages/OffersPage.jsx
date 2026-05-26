@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/api";
 import OfferCard from "../components/OfferCard";
 import AISearchBar from "../components/AISearchBar";
+import { DIPLOMA_LEVELS } from "../lib/diplomas";
 import FranceMap from "../components/FranceMap"; // kept import for backward compat; not rendered
 const REGIONS_LIST = [
   "Île-de-France", "Auvergne-Rhône-Alpes", "Nouvelle-Aquitaine", "Occitanie", "Hauts-de-France",
@@ -18,18 +19,13 @@ import { Badge } from "../components/ui/badge";
 const SOURCES = [
   { id: "StageConnect", label: "StageEtudiant" },
   { id: "La Bonne Alternance", label: "La Bonne Alternance ★" },
-  { id: "FranceTravail", label: "France Travail" },
-  { id: "HelloWork", label: "HelloWork" },
-  { id: "LinkedIn", label: "LinkedIn" },
-  { id: "Indeed", label: "Indeed" },
-  { id: "WelcomeToTheJungle", label: "Welcome to the Jungle" },
-  { id: "JobTeaser", label: "JobTeaser" },
-  { id: "StudentJob", label: "StudentJob" },
-  { id: "LEtudiant", label: "L'Étudiant" },
-  { id: "Apec", label: "Apec" },
-  { id: "Meteojob", label: "Meteojob" },
-  { id: "Monster", label: "Monster" },
-  { id: "TalentCom", label: "Talent.com" },
+  { id: "FranceTravail", label: "France Travail ✓" },
+  { id: "Ashby", label: "Ashby" },
+  { id: "Arbeitnow", label: "Arbeitnow" },
+  { id: "Remotive", label: "Remotive" },
+  { id: "RemoteOK", label: "RemoteOK" },
+  { id: "Jobicy", label: "Jobicy" },
+  { id: "Greenhouse", label: "Greenhouse" },
 ];
 
 export default function OffersPage() {
@@ -123,13 +119,24 @@ export default function OffersPage() {
       const r = await api.get(`/offers?${p.toString()}`);
       return r.data;
     };
-    Promise.all([fetchInternal(), fetchLba(), fetchFt()])
-      .then(([internal, lba, ft]) => {
-        // Merge — internal first, then LBA, then FT. dedupe by siret/offer_id
+    const fetchKeyless = async () => {
+      // include external keyless aggregated sources when no specific source filter
+      if (source || lbaOnly || ftOnly) return [];
+      try {
+        const { data } = await api.get('/external-offers/keyless');
+        return data.results || [];
+      } catch (err) {
+        console.warn('Keyless fetch failed', err);
+        return [];
+      }
+    };
+    Promise.all([fetchInternal(), fetchLba(), fetchFt(), fetchKeyless()])
+      .then(([internal, lba, ft, keyless]) => {
+        // Merge — internal first, then LBA, then FT, then keyless. dedupe by external_url/offer_id
         const seen = new Set();
         const merged = [];
-        for (const o of [...internal, ...lba, ...ft]) {
-          const k = o.offer_id || o.siret;
+        for (const o of [...internal, ...lba, ...ft, ...keyless]) {
+          const k = o.external_url || o.offer_id || o.siret;
           if (k && seen.has(k)) continue;
           seen.add(k);
           merged.push(o);
@@ -177,7 +184,8 @@ export default function OffersPage() {
         <div>
           <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Niveau</label>
           <select data-testid="filter-level" value={level} onChange={(e) => updateParam("level", e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 h-10 text-sm bg-white">
-            <option value="">Tous</option><option value="Bac+2">Bac+2</option><option value="Bac+3">Bac+3</option><option value="Bac+5">Bac+5</option>
+            <option value="">Tous niveaux</option>
+            {DIPLOMA_LEVELS.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>
         <div>

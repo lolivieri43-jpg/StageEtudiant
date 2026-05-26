@@ -1,0 +1,30 @@
+{
+  "summary": "Phase F + G validation: 33 diploma levels endpoint, no-demo offers, source_priority sorting (StageEtudiant=10, FranceTravail/LBA=8) with StageEtudiant first, 6-source keyless aggregator (Ashby/Arbeitnow/Remotive/RemoteOK/Jobicy/Greenhouse) with 12h cache, admin CRUD for ashby-boards & greenhouse-boards (403 non-admin), cache purge, sources status, anonymous AI search. Frontend: AISearchBar visible on Landing, 33 levels in offer publish + profile edit, source-badges 'Origine : XXX' red on every offer card with StageEtudiant present, no fake sources/TEST_ titles. 16/16 backend pytest passed. All frontend assertions passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter12_phaseFG.py",
+    "/app/test_reports/pytest/pytest_iter12.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Review request mentions route '/publish' but actual app route is '/offers/new' — only naming discrepancy in PRD; no functional issue.",
+    "Review request mentions '/profile' route but actual is '/profile/:id' — both pages work correctly when accessed via the proper paths.",
+    "/api/external-offers/keyless has no auth and triggers up to 6 outbound HTTP fan-out calls per cache-miss (12h TTL). Consider adding rate-limit / IP throttling to protect upstream APIs and bandwidth.",
+    "Anonymous POST /api/ai/search now exposed publicly — confirm intentional and ensure LLM cost is rate-limited per IP."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter12_phaseFG.py"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% (all assertions)"},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, lucas.martin@email.fr/Demo1234!, hr@brightstudio011.fr/Demo1234! — all valid",
+  "seed_data_creation": "TEST_Board / TEST_GH ashby+greenhouse boards created and cleaned up within tests",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phases A–G validated. /publish in PRD = /offers/new. Profile edit only reachable via /profile/{user_id}. Keyless aggregator cache TTL 12h: 2nd call returns cache_hit=true. source_priority: StageConnect/StageEtudiant=10, FranceTravail/LBA=8, externals lower. No is_demo offers, no fake sources (HelloWork/LinkedIn/Indeed) anywhere. AI search anonymous OK (200). Phase H pending: Adzuna/Jooble/APIFY keys not yet configured — do not test those endpoints.",
+  "rca of the issue": "N/A — no issues found this iteration."
+}
