@@ -14,6 +14,20 @@ export default function AdminPage() {
   const [platform, setPlatform] = useState(null);
   const [apiStats, setApiStats] = useState(null);
   const [cache, setCache] = useState(null);
+  const [sources, setSources] = useState(null);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+
+  const loadSources = async () => {
+    try {
+      setSourcesLoading(true);
+      const { data } = await api.get("/admin/external-sources-status");
+      setSources(data);
+    } catch {
+      // silent
+    } finally {
+      setSourcesLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (user?.role !== "admin") return;
@@ -22,6 +36,7 @@ export default function AdminPage() {
     api.get("/admin/platform-stats").then((r) => setPlatform(r.data));
     api.get("/admin/api-stats?days=30").then((r) => setApiStats(r.data));
     api.get("/admin/external-cache").then((r) => setCache(r.data));
+    loadSources();
   }, [user]);
 
   if (!user || user.role !== "admin") {
@@ -171,6 +186,58 @@ export default function AdminPage() {
                 <span className="shrink-0">Exp: {e.expires_at?.slice(0, 10)} · {e.results_count} rés.</span>
               </div>
             ))}
+          </div>
+        )}
+
+        {sources && (
+          <div className="card-soft p-6 mb-6" data-testid="admin-sources-api">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold">Sources API d'offres ({sources.sources?.length || 0})</h2>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="rounded-full" disabled={sourcesLoading}
+                  onClick={async () => {
+                    setSourcesLoading(true);
+                    try { await api.get('/external-offers/all?force_refresh=true'); toast.success('Sources externes rafraîchies'); await loadSources(); }
+                    catch { toast.error('Erreur rafraîchissement'); }
+                    finally { setSourcesLoading(false); }
+                  }} data-testid="refresh-sources">Forcer le refresh</Button>
+                <Button size="sm" variant="outline" className="rounded-full text-rose-600 border-rose-200"
+                  onClick={async () => {
+                    await api.delete('/admin/external-offers-cache');
+                    toast.success('Cache offres externes vidé');
+                    await loadSources();
+                  }} data-testid="purge-external-offers">Vider cache offres ext.</Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              <Tile label="Offres en cache" value={sources.cache?.total_offers || 0} />
+              <Tile label="Cache jusqu'à" value={sources.cache?.expires_at?.slice(0,16).replace('T',' ') || '—'} />
+              <Tile label="Sources actives" value={sources.sources?.filter(s => s.enabled).length || 0} />
+              <Tile label="Avec clé requise" value={sources.sources?.filter(s => s.requires_key).length || 0} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs sm:text-sm">
+                <thead><tr className="text-left text-slate-500 border-b border-slate-100">
+                  <th className="py-2">Source</th><th>État</th><th>Offres</th><th>Dernier appel</th><th>Statut</th><th>Erreur récente</th>
+                </tr></thead>
+                <tbody>
+                  {sources.sources.map(s => (
+                    <tr key={s.name} className="border-b border-slate-50" data-testid={`source-row-${s.name}`}>
+                      <td className="py-2 font-semibold">{s.name} {s.requires_key && <span className="ml-1 text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">clé</span>}</td>
+                      <td>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${s.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {s.enabled ? 'ACTIVE' : 'OFF'}
+                        </span>
+                      </td>
+                      <td className="font-bold text-blue-600">{s.cached_count}</td>
+                      <td className="text-slate-500">{s.last_call ? s.last_call.slice(0,16).replace('T',' ') : '—'}</td>
+                      <td><span className="text-slate-500">{s.last_status || '—'}</span></td>
+                      <td className="text-rose-700 max-w-[260px] truncate">{s.last_error || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

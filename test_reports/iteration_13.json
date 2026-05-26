@@ -1,0 +1,39 @@
+{
+  "summary": "Phase H validation (Adzuna + Jooble + EURES + admin sources card). 11/11 backend pytest passed. Adzuna returns 100 real French offers, Jooble=0 (known 403 from upstream — key not yet activated), EURES=0 (APIFY_TOKEN empty as expected). /api/external-offers/all merges keyless+keyed = 222 offers (Arbeitnow 47, Remotive 10, RemoteOK 12, Jobicy 5, Ashby 48, Adzuna 100) with 0 duplicates. Cache hit on 2nd call works. Admin endpoints (/admin/external-sources-status, /admin/external-offers-cache) listed all 11 sources, protected (401 anon). Phase F/G re-validated: 33 diploma levels, no is_demo offers, anonymous AI search 200. Frontend: AISearchBar visible & functional on Landing as anonymous; /offers shows 268 offers with Adzuna/Arbeitnow/Remotive/RemoteOK/Jobicy/Ashby/FranceTravail/StageEtudiant cards each tagged 'ORIGINE : XXX'; source filter dropdown contains all 13 sources (Adzuna, Jooble, EURES included); diploma level select has 33 real levels + 1 placeholder; /admin shows new 'Sources API d'offres' card with refresh-sources and purge-external-offers buttons (clickable).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/external-offers/keyed (Jooble)", "issue": "Jooble returns 0 offers due to upstream HTTP 403 — known: API key not yet activated server-side at Jooble"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter13_phaseH.py",
+    "/app/test_reports/pytest/pytest_iter13.xml"
+  ],
+  "action_items": [
+    "Optional: contact Jooble support to activate the API key (currently 403). Frontend already lists Jooble in source filter — when activated, no code change needed.",
+    "Optional: provide APIFY_TOKEN to enable EURES scraper (currently silently skipped as designed).",
+    "Optional hardening: rate-limit anonymous POST /api/ai/search per IP to control LLM costs (already raised in iter12)."
+  ],
+  "critical_code_review_comments": [
+    "OffersPage has TWO instances of [data-testid=filter-source] (desktop + mobile filter columns). Consider differentiating data-testid (e.g., filter-source-desktop / filter-source-mobile) or hiding via display:none in DOM to avoid Playwright resolving 2 elements.",
+    "external_keyed.fetch_adzuna: free Adzuna tier is 250 calls/month — the 12h cache TTL is appropriate, but consider increasing TTL to 24h for keyed sources to better absorb traffic.",
+    "Admin /external-sources-status loops over 11 sources and does 2 Mongo queries per source (22 queries serial). Acceptable for low-frequency admin call but could be aggregated via $group for scale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter13_phaseH.py",
+    "/app/test_reports/iteration_13.json"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (all 5 critical assertions: AISearchBar, externals visible, 33 diplomas, source list, admin card + buttons)"},
+  "test_credentials": "admin@stagiaireconnect.fr / Admin123! valid; candidate/company auto-seeded credentials valid.",
+  "seed_data_creation": "None this iteration (only read-only and cache-purge operations).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase H validated end-to-end. Adzuna delivers ~100 FR offers per refresh; Jooble currently 0 (upstream 403, NOT a code bug); EURES 0 (no APIFY_TOKEN). Total external offers ~222 via /api/external-offers/all. Frontend /offers shows 268 offers (mix internal + externals). Admin page now has data-testid=admin-sources-api with refresh-sources + purge-external-offers buttons. /api/offers correctly excludes is_demo. Anonymous /api/ai/search works. If Jooble or APIFY_TOKEN gets activated, just rerun test_iter13_phaseH.py to confirm.",
+  "rca of the issue": "N/A — only known upstream Jooble 403 (out-of-scope, dependency on Jooble account activation)."
+}

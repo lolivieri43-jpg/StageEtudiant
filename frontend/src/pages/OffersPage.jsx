@@ -20,6 +20,9 @@ const SOURCES = [
   { id: "StageConnect", label: "StageEtudiant" },
   { id: "La Bonne Alternance", label: "La Bonne Alternance ★" },
   { id: "FranceTravail", label: "France Travail ✓" },
+  { id: "Adzuna", label: "Adzuna" },
+  { id: "Jooble", label: "Jooble" },
+  { id: "EURES", label: "EURES (UE)" },
   { id: "Ashby", label: "Ashby" },
   { id: "Arbeitnow", label: "Arbeitnow" },
   { id: "Remotive", label: "Remotive" },
@@ -120,19 +123,24 @@ export default function OffersPage() {
       return r.data;
     };
     const fetchKeyless = async () => {
-      // include external keyless aggregated sources when no specific source filter
-      if (source || lbaOnly || ftOnly) return [];
+      // include external keyless + keyed aggregated sources when no specific source filter
+      // OR when a specific external source is selected (we'll filter client-side)
+      const EXT_SOURCES = new Set(["Adzuna", "Jooble", "EURES", "Ashby", "Arbeitnow",
+                                    "Remotive", "RemoteOK", "Jobicy", "Greenhouse"]);
+      if (lbaOnly || ftOnly) return [];
+      if (source && !EXT_SOURCES.has(source)) return [];
       try {
-        const { data } = await api.get('/external-offers/keyless');
-        return data.results || [];
+        const { data } = await api.get('/external-offers/all');
+        const all = data.results || [];
+        return source ? all.filter(o => o.source === source) : all;
       } catch (err) {
-        console.warn('Keyless fetch failed', err);
+        console.warn('External fetch failed', err);
         return [];
       }
     };
     Promise.all([fetchInternal(), fetchLba(), fetchFt(), fetchKeyless()])
       .then(([internal, lba, ft, keyless]) => {
-        // Merge — internal first, then LBA, then FT, then keyless. dedupe by external_url/offer_id
+        // Merge — internal first, then LBA, then FT, then external aggregated. dedupe by external_url/offer_id
         const seen = new Set();
         const merged = [];
         for (const o of [...internal, ...lba, ...ft, ...keyless]) {

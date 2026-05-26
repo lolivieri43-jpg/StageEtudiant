@@ -3746,6 +3746,10 @@ from external_sources import (
     fetch_all_keyless,
     fetch_ashby, fetch_arbeitnow, fetch_remotive, fetch_remoteok, fetch_jobicy, fetch_greenhouse,
 )
+from external_keyed import (
+    fetch_all_keyed,
+    fetch_adzuna, fetch_jooble, fetch_eures_apify,
+)
 
 ext_offers_api = APIRouter(prefix="/api")
 
@@ -3808,6 +3812,43 @@ def _compute_priority(o: dict) -> int:
 @ext_offers_api.get("/external-offers/keyless")
 async def get_keyless_offers(force_refresh: bool = False):
     return await fetch_all_keyless(db, force_refresh=force_refresh)
+
+
+@ext_offers_api.get("/external-offers/keyed")
+async def get_keyed_offers(
+    force_refresh: bool = False,
+    what: str = "stage alternance",
+    where: str = "France",
+):
+    """Aggregated Adzuna + Jooble + EURES (Apify) offers, cached 12h."""
+    return await fetch_all_keyed(db, force_refresh=force_refresh, what=what, where=where)
+
+
+@ext_offers_api.get("/external-offers/all")
+async def get_all_external_offers(force_refresh: bool = False):
+    """Aggregate keyless + keyed external sources in one call (parallel)."""
+    keyless, keyed = await asyncio.gather(
+        fetch_all_keyless(db, force_refresh=force_refresh),
+        fetch_all_keyed(db, force_refresh=force_refresh),
+        return_exceptions=True,
+    )
+    keyless = keyless if isinstance(keyless, dict) else {"results": [], "by_source": {}}
+    keyed = keyed if isinstance(keyed, dict) else {"results": [], "by_source": {}}
+    merged: list = []
+    seen: set = set()
+    for o in (keyless.get("results", []) + keyed.get("results", [])):
+        k = o.get("external_url") or o.get("offer_id")
+        if k and k in seen:
+            continue
+        if k:
+            seen.add(k)
+        merged.append(o)
+    by_source = {**keyless.get("by_source", {}), **keyed.get("by_source", {})}
+    return {
+        "results": merged,
+        "by_source": by_source,
+        "cache_hit": bool(keyless.get("cache_hit") and keyed.get("cache_hit")),
+    }
 
 
 @ext_offers_api.post("/admin/ashby-boards")
