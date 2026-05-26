@@ -159,8 +159,17 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Split server.py en routers par domaine
 
 ## Next Tasks
-1. Intégration uploads de fichiers (CV, logo) — playbook object storage Emergent
-2. Filtre distance/rayon sur la carte
-3. Suivi d'entreprise + sauvegarde d'offres
-4. Vérification email + mot de passe oublié
+1. **Phase I — Médias riches dans le fil social** : posts avec photos, vidéos, liens, PDFs (upload + preview + compression)
+2. **Phase J — Pièces jointes messagerie** : extension WebSocket + collection `message_attachments` (PDF/DOCX/images)
+3. Activation Jooble côté upstream (clé fournie retourne 403) + APIFY_TOKEN pour activer EURES
+4. Split server.py en routers par domaine (auth/users/offers/admin)
 5. Modération admin (publications + signalements)
+
+## Iteration 13 (2026-02) — Phase H : APIs externes avec clés
+- ✅ **Adzuna FR** : `/app/backend/external_keyed.py::fetch_adzuna()` → 100 offres réelles par refresh (cache 12h)
+- ✅ **Jooble** : implémenté, mais clé retourne HTTP 403 (à activer côté Jooble)
+- ✅ **EURES via Apify** : implémenté `fetch_eures_apify()`, skip silencieux tant que `APIFY_TOKEN` absent
+- ✅ **Endpoints** : `GET /api/external-offers/keyed`, `GET /api/external-offers/all` (merge keyless+keyed dédupliqué)
+- ✅ **Admin Sources API** : carte `admin-sources-api` dans `/admin` avec table 11 sources (état, dernier appel, erreurs, offres en cache) + boutons `Forcer le refresh` et `Vider cache offres ext.`
+- ✅ **Tests** : 11/11 backend pass (`/app/backend/tests/test_iter13_phaseH.py`), 5/5 frontend critique pass (iteration_13.json)
+- 📊 **Volume agrégé** : 222 offres externes (Adzuna 100 + Ashby 48 + Arbeitnow 47 + RemoteOK 12 + Remotive 10 + Jobicy 5), 268 sur `/offers` avec interne+LBA+FT
