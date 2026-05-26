@@ -111,10 +111,42 @@ class ApplicationIn(BaseModel):
     online_cv_template: Optional[str] = "modern"
     uploaded_doc_ids: List[str] = []
 
+class PostMedia(BaseModel):
+    type: str  # image | video | pdf
+    url: str
+    file_id: Optional[str] = None
+    filename: Optional[str] = None
+    mime: Optional[str] = None
+    size: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    poster: Optional[str] = None  # video thumbnail
+
+
+class LinkPreview(BaseModel):
+    url: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    image: Optional[str] = None
+    domain: Optional[str] = None
+
+
 class PostIn(BaseModel):
     content: str
-    image: Optional[str] = None
+    image: Optional[str] = None  # backward compat
     category: Optional[str] = "general"  # annonce, recherche, conseil, general
+    media: List[PostMedia] = []
+    link_preview: Optional[LinkPreview] = None
+
+
+class MessageAttachment(BaseModel):
+    type: str  # image | video | pdf | doc | file
+    url: str
+    file_id: Optional[str] = None
+    filename: Optional[str] = None
+    mime: Optional[str] = None
+    size: Optional[int] = None
+
 
 class CommentIn(BaseModel):
     post_id: str
@@ -123,7 +155,8 @@ class CommentIn(BaseModel):
 class MessageIn(BaseModel):
     to_user_id: str
     content: str
-    attachment: Optional[str] = None
+    attachment: Optional[str] = None  # backward compat (single url)
+    attachments: List[MessageAttachment] = []
 
 class ContactRequestIn(BaseModel):
     to_user_id: str
@@ -510,6 +543,10 @@ async def update_application(app_id: str, data: dict, user=Depends(get_current_u
 @api.post("/posts")
 async def create_post(data: PostIn, user=Depends(get_current_user)):
     post_id = f"post_{uuid.uuid4().hex[:12]}"
+    media = [m.model_dump() for m in (data.media or [])]
+    # Backward compat: if `image` provided but no media, add it to media list
+    if data.image and not media:
+        media.append({"type": "image", "url": data.image, "file_id": None, "filename": None, "mime": None, "size": None})
     doc = {
         "post_id": post_id,
         "author_id": user["user_id"],
@@ -517,7 +554,9 @@ async def create_post(data: PostIn, user=Depends(get_current_user)):
         "author_role": user["role"],
         "author_avatar": user.get("profile", {}).get("avatar") or user.get("profile", {}).get("logo"),
         "content": data.content,
-        "image": data.image,
+        "image": data.image,  # backward compat
+        "media": media,
+        "link_preview": data.link_preview.model_dump() if data.link_preview else None,
         "category": data.category,
         "likes": [],
         "comments_count": 0,
@@ -526,6 +565,51 @@ async def create_post(data: PostIn, user=Depends(get_current_user)):
     await db.posts.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@api.post("/posts/link-preview")
+async def fetch_link_preview(body: dict, user=Depends(get_current_user)):
+    """Fetch Open Graph metadata for a URL to enrich a post."""
+    import re as _re
+    from urllib.parse import urlparse
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "URL requise")
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        import requests as _rq
+        r = _rq.get(url, headers={"User-Agent": "Mozilla/5.0 StageEtudiant-LinkPreview/1.0"}, timeout=8, allow_redirects=True)
+        html = r.text[:300000]  # limit
+    except Exception as e:
+        raise HTTPException(400, f"Impossible de récupérer la page: {e}")
+
+    def og(prop):
+        m = _re.search(rf'<meta[^>]+property=["\']og:{prop}["\'][^>]+content=["\']([^"\']+)["\']', html, _re.I)
+        return m.group(1) if m else None
+
+    def meta_name(name):
+        m = _re.search(rf'<meta[^>]+name=["\']{name}["\'][^>]+content=["\']([^"\']+)["\']', html, _re.I)
+        return m.group(1) if m else None
+
+    title_match = _re.search(r"<title[^>]*>([^<]+)</title>", html, _re.I)
+    title = og("title") or (title_match.group(1).strip() if title_match else None)
+    description = og("description") or meta_name("description")
+    image = og("image")
+    if image and image.startswith("//"):
+        image = "https:" + image
+    elif image and image.startswith("/"):
+        p = urlparse(url)
+        image = f"{p.scheme}://{p.netloc}{image}"
+    parsed = urlparse(url)
+    return {
+        "url": url,
+        "title": (title or "")[:200] or None,
+        "description": (description or "")[:300] or None,
+        "image": image,
+        "domain": parsed.netloc,
+    }
+
 
 @api.get("/posts")
 async def list_posts(limit: int = 30):
@@ -584,6 +668,9 @@ async def send_message(data: MessageIn, user=Depends(get_current_user)):
     conv_id = f"conv_{pair[0][-6:]}_{pair[1][-6:]}"
     msg_id = f"msg_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
+    attachments = [a.model_dump() for a in (data.attachments or [])]
+    if data.attachment and not attachments:
+        attachments = [{"type": "file", "url": data.attachment, "file_id": None, "filename": None, "mime": None, "size": None}]
     doc = {
         "message_id": msg_id,
         "conv_id": conv_id,
@@ -592,7 +679,8 @@ async def send_message(data: MessageIn, user=Depends(get_current_user)):
         "to_id": data.to_user_id,
         "to_name": other["name"],
         "content": data.content,
-        "attachment": data.attachment,
+        "attachment": data.attachment,  # backward compat
+        "attachments": attachments,
         "read": False,
         "created_at": now,
     }
@@ -602,7 +690,7 @@ async def send_message(data: MessageIn, user=Depends(get_current_user)):
         {"$set": {
             "conv_id": conv_id,
             "participants": pair,
-            "last_message": data.content,
+            "last_message": data.content or ("📎 " + (attachments[0]["filename"] or "Pièce jointe") if attachments else ""),
             "last_at": now,
         }},
         upsert=True,
@@ -1440,7 +1528,24 @@ def get_object(path: str):
     return r.content, r.headers.get("Content-Type", "application/octet-stream")
 
 MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
-        "webp": "image/webp", "pdf": "application/pdf"}
+        "webp": "image/webp", "pdf": "application/pdf",
+        "mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+
+# Max sizes per file kind (bytes)
+MAX_BYTES = {
+    "image/jpeg": 8 * 1024 * 1024,
+    "image/png": 8 * 1024 * 1024,
+    "image/gif": 8 * 1024 * 1024,
+    "image/webp": 8 * 1024 * 1024,
+    "application/pdf": 15 * 1024 * 1024,
+    "video/mp4": 50 * 1024 * 1024,
+    "video/webm": 50 * 1024 * 1024,
+    "video/quicktime": 50 * 1024 * 1024,
+}
+DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 
 @api.post("/upload")
 async def upload_file(file: UploadFile = File(...), kind: str = "doc", user=Depends(get_current_user)):
@@ -1450,8 +1555,9 @@ async def upload_file(file: UploadFile = File(...), kind: str = "doc", user=Depe
     file_id = uuid.uuid4().hex
     path = f"{APP_NAME}/{user['user_id']}/{file_id}.{ext}"
     data = await file.read()
-    if len(data) > 8 * 1024 * 1024:
-        raise HTTPException(400, "Fichier trop volumineux (max 8 Mo)")
+    limit = MAX_BYTES.get(MIME[ext], DEFAULT_MAX_BYTES)
+    if len(data) > limit:
+        raise HTTPException(400, f"Fichier trop volumineux (max {limit // (1024*1024)} Mo)")
     result = put_object(path, data, MIME[ext])
     doc = {
         "file_id": file_id,
@@ -1476,8 +1582,8 @@ async def download_file(file_id: str, request: Request, auth: Optional[str] = Qu
     rec = await db.files.find_one({"file_id": file_id, "is_deleted": False}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Fichier introuvable")
-    # Avatars and banners are PUBLIC (need to be loadable from <img src> without auth)
-    if rec.get("kind") in ("avatar", "banner"):
+    # Avatars, banners, post media, ad media, deal images are PUBLIC (loaded from <img> without auth)
+    if rec.get("kind") in ("avatar", "banner", "post", "ad", "deal", "feed"):
         data, ct = get_object(rec["storage_path"])
         return FResponse(content=data, media_type=rec.get("content_type", ct))
     # Find document/photo reference if any
@@ -2142,18 +2248,24 @@ async def send_message_rt(data: MessageIn, user=Depends(get_current_user)):
     conv_id = f"conv_{pair[0][-6:]}_{pair[1][-6:]}"
     msg_id = f"msg_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
+    attachments = [a.model_dump() for a in (data.attachments or [])]
+    if data.attachment and not attachments:
+        attachments = [{"type": "file", "url": data.attachment, "file_id": None, "filename": None, "mime": None, "size": None}]
     doc = {
         "message_id": msg_id, "conv_id": conv_id,
         "from_id": user["user_id"], "from_name": user["name"],
         "to_id": data.to_user_id, "to_name": other["name"],
         "content": data.content, "attachment": data.attachment,
+        "attachments": attachments,
         "read": False, "created_at": now,
     }
     await db.messages.insert_one(doc)
     doc.pop("_id", None)
     await db.conversations.update_one(
         {"conv_id": conv_id},
-        {"$set": {"conv_id": conv_id, "participants": pair, "last_message": data.content, "last_at": now}},
+        {"$set": {"conv_id": conv_id, "participants": pair,
+                  "last_message": data.content or ("📎 " + (attachments[0]["filename"] or "Pièce jointe") if attachments else ""),
+                  "last_at": now}},
         upsert=True,
     )
     await notify(data.to_user_id, "message", f"Nouveau message de {user['name']}", "/messages", {"user_id": user["user_id"], "name": user["name"]})

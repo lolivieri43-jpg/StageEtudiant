@@ -8,7 +8,8 @@ import { Textarea } from "../components/ui/textarea";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { AlertCircle, Megaphone, Smartphone, Monitor, Save, Send, Image as ImageIcon, Tag, Calendar, MapPin, Link as LinkIcon } from "lucide-react";
+import { AlertCircle, Megaphone, Smartphone, Monitor, Save, Send, Tag, Calendar, MapPin, LayoutTemplate, MousePointer } from "lucide-react";
+import AdBuilder, { RenderBlocks } from "../components/AdBuilder";
 
 const CATS = [
   { id: "general", label: "Général" },
@@ -42,6 +43,7 @@ export default function NewAdPage() {
   const { user } = useAuth();
   const [quota, setQuota] = useState({ pro: false, used: 0, max: 1 });
   const [preview, setPreview] = useState("desktop"); // desktop|mobile
+  const [mode, setMode] = useState("simple"); // simple | composer
   const [form, setForm] = useState({
     title: "", short_text: "", image: "", logo: "",
     cta_label: "Découvrir", cta_url: "",
@@ -60,6 +62,7 @@ export default function NewAdPage() {
     if (editMode) {
       api.get(`/ads/${id}`).then(r => {
         setForm(f => ({ ...f, ...r.data, style: { ...f.style, ...(r.data.style || {}) } }));
+        if (r.data.blocks && r.data.blocks.length > 0) setMode("composer");
       }).catch(() => toast.error("Publicité introuvable"));
     }
   }, [user, editMode, id]);
@@ -131,43 +134,84 @@ export default function NewAdPage() {
         <div className="grid lg:grid-cols-2 gap-6">
           {/* Form */}
           <div className="card-soft p-6 space-y-4">
-            <h2 className="font-bold text-slate-900 mb-2 flex items-center gap-2"><Tag className="w-4 h-4" />Contenu</h2>
-            <div>
-              <Label>Titre *</Label>
-              <Input required value={form.title} onChange={set("title")} className="rounded-xl mt-1" data-testid="ad-title" maxLength={80} />
+            <div className="flex items-center gap-2 mb-4 p-1 rounded-xl bg-slate-100" data-testid="mode-toggle">
+              <button type="button" onClick={() => setMode("simple")}
+                      className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 ${mode === "simple" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+                      data-testid="mode-simple">
+                <LayoutTemplate className="w-4 h-4" />Mode simple
+              </button>
+              <button type="button" onClick={() => setMode("composer")}
+                      className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 ${mode === "composer" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+                      data-testid="mode-composer">
+                <MousePointer className="w-4 h-4" />Composer (drag & drop)
+              </button>
             </div>
-            <div>
-              <Label>Texte court * <span className="text-xs text-slate-400 font-normal">(max 220 caractères)</span></Label>
-              <Textarea required value={form.short_text} onChange={set("short_text")} rows={3} maxLength={220} className="rounded-xl mt-1" data-testid="ad-short-text" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Image (URL)</Label>
-                <Input value={form.image} onChange={set("image")} placeholder="https://..." className="rounded-xl mt-1" data-testid="ad-image" />
+
+            {mode === "composer" ? (
+              <AdBuilder
+                blocks={form.blocks || []}
+                onChange={(blocks) => setForm(f => ({ ...f, blocks }))}
+                accentColor={form.style.accent_color}
+              />
+            ) : (
+              <>
+                <h2 className="font-bold text-slate-900 mb-2 flex items-center gap-2"><Tag className="w-4 h-4" />Contenu</h2>
+                <div>
+                  <Label>Titre *</Label>
+                  <Input required value={form.title} onChange={set("title")} className="rounded-xl mt-1" data-testid="ad-title" maxLength={80} />
+                </div>
+                <div>
+                  <Label>Texte court * <span className="text-xs text-slate-400 font-normal">(max 220 caractères)</span></Label>
+                  <Textarea required value={form.short_text} onChange={set("short_text")} rows={3} maxLength={220} className="rounded-xl mt-1" data-testid="ad-short-text" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Image (URL)</Label>
+                    <Input value={form.image} onChange={set("image")} placeholder="https://..." className="rounded-xl mt-1" data-testid="ad-image" />
+                  </div>
+                  <div>
+                    <Label>Logo entreprise (URL)</Label>
+                    <Input value={form.logo} onChange={set("logo")} placeholder="https://..." className="rounded-xl mt-1" data-testid="ad-logo" />
+                  </div>
+                  <div>
+                    <Label>Texte du bouton</Label>
+                    <Input value={form.cta_label} onChange={set("cta_label")} className="rounded-xl mt-1" data-testid="ad-cta-label" maxLength={30} />
+                  </div>
+                  <div>
+                    <Label>Lien externe (CTA)</Label>
+                    <Input type="url" value={form.cta_url} onChange={set("cta_url")} placeholder="https://..." className="rounded-xl mt-1" data-testid="ad-cta-url" />
+                  </div>
+                  <div>
+                    <Label>Code promo</Label>
+                    <Input value={form.promo_code} onChange={set("promo_code")} className="rounded-xl mt-1" data-testid="ad-promo" />
+                  </div>
+                  <div>
+                    <Label>Catégorie</Label>
+                    <select value={form.category} onChange={set("category")} className="w-full rounded-xl border border-slate-200 h-10 px-3 mt-1" data-testid="ad-category">
+                      {CATS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
+            {mode === "composer" && (
+              <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100">
+                <div>
+                  <Label>Titre (admin)</Label>
+                  <Input required value={form.title} onChange={set("title")} className="rounded-xl mt-1" data-testid="ad-title" maxLength={80} />
+                </div>
+                <div>
+                  <Label>Catégorie</Label>
+                  <select value={form.category} onChange={set("category")} className="w-full rounded-xl border border-slate-200 h-10 px-3 mt-1" data-testid="ad-category">
+                    {CATS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <Label>Texte de fallback</Label>
+                  <Textarea value={form.short_text} onChange={set("short_text")} rows={2} maxLength={220} className="rounded-xl mt-1" placeholder="Affiché si les blocs ne se chargent pas" data-testid="ad-short-text" />
+                </div>
               </div>
-              <div>
-                <Label>Logo entreprise (URL)</Label>
-                <Input value={form.logo} onChange={set("logo")} placeholder="https://..." className="rounded-xl mt-1" data-testid="ad-logo" />
-              </div>
-              <div>
-                <Label>Texte du bouton</Label>
-                <Input value={form.cta_label} onChange={set("cta_label")} className="rounded-xl mt-1" data-testid="ad-cta-label" maxLength={30} />
-              </div>
-              <div>
-                <Label>Lien externe (CTA)</Label>
-                <Input type="url" value={form.cta_url} onChange={set("cta_url")} placeholder="https://..." className="rounded-xl mt-1" data-testid="ad-cta-url" />
-              </div>
-              <div>
-                <Label>Code promo</Label>
-                <Input value={form.promo_code} onChange={set("promo_code")} className="rounded-xl mt-1" data-testid="ad-promo" />
-              </div>
-              <div>
-                <Label>Catégorie</Label>
-                <select value={form.category} onChange={set("category")} className="w-full rounded-xl border border-slate-200 h-10 px-3 mt-1" data-testid="ad-category">
-                  {CATS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
-              </div>
-            </div>
+            )}
 
             <h2 className="font-bold text-slate-900 mt-6 mb-2 flex items-center gap-2"><MapPin className="w-4 h-4" />Ciblage géographique</h2>
             <div className="grid grid-cols-2 gap-3">
@@ -277,6 +321,7 @@ export default function NewAdPage() {
 // Reusable preview/render component
 export function SponsoredAdPreview({ ad, mode = "desktop", onClick }) {
   const st = ad.style || {};
+  const hasBlocks = (ad.blocks || []).length > 0;
   return (
     <div
       className="overflow-hidden border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
@@ -295,34 +340,41 @@ export function SponsoredAdPreview({ ad, mode = "desktop", onClick }) {
         </Badge>
         {ad.logo && <img src={ad.logo} alt="logo" className="w-7 h-7 rounded-full object-cover" />}
       </div>
-      {ad.image && (
-        <div className={`mt-3 ${mode === "mobile" ? "aspect-[16/10]" : "aspect-[16/9]"} bg-slate-100 overflow-hidden`}>
-          <img src={ad.image} alt="" className="w-full h-full object-cover" />
-        </div>
-      )}
-      <div className="px-4 py-3">
-        <div className="font-bold text-base leading-snug">{ad.title || "Titre de votre publicité"}</div>
-        <div className="text-sm mt-1 opacity-80 line-clamp-3">{ad.short_text || "Texte court qui présente votre offre."}</div>
-        <div className="text-[11px] mt-2 opacity-60">
-          {ad.company_name || "Votre entreprise"}
-          {ad.city && ` · ${ad.city}`}
-          {ad.region && ` · ${ad.region}`}
-        </div>
-        {ad.promo_code && (
-          <div className="mt-3 inline-block text-[11px] font-bold border border-dashed px-3 py-1.5 rounded-lg" style={{ borderColor: st.accent_color, color: st.accent_color }}>
-            Code : <span className="font-mono">{ad.promo_code}</span>
+
+      {hasBlocks ? (
+        <RenderBlocks blocks={ad.blocks} accentColor={st.accent_color} />
+      ) : (
+        <>
+          {ad.image && (
+            <div className={`mt-3 ${mode === "mobile" ? "aspect-[16/10]" : "aspect-[16/9]"} bg-slate-100 overflow-hidden`}>
+              <img src={ad.image} alt="" className="w-full h-full object-cover" />
+            </div>
+          )}
+          <div className="px-4 py-3">
+            <div className="font-bold text-base leading-snug">{ad.title || "Titre de votre publicité"}</div>
+            <div className="text-sm mt-1 opacity-80 line-clamp-3">{ad.short_text || "Texte court qui présente votre offre."}</div>
+            <div className="text-[11px] mt-2 opacity-60">
+              {ad.company_name || "Votre entreprise"}
+              {ad.city && ` · ${ad.city}`}
+              {ad.region && ` · ${ad.region}`}
+            </div>
+            {ad.promo_code && (
+              <div className="mt-3 inline-block text-[11px] font-bold border border-dashed px-3 py-1.5 rounded-lg" style={{ borderColor: st.accent_color, color: st.accent_color }}>
+                Code : <span className="font-mono">{ad.promo_code}</span>
+              </div>
+            )}
+            {(ad.cta_url || ad.cta_label) && (
+              <button
+                type="button"
+                className="mt-3 w-full text-sm font-bold py-2.5 rounded-xl"
+                style={{ background: st.accent_color || "#2563eb", color: "#fff" }}
+              >
+                {ad.cta_label || "Découvrir"}
+              </button>
+            )}
           </div>
-        )}
-        {(ad.cta_url || ad.cta_label) && (
-          <button
-            type="button"
-            className="mt-3 w-full text-sm font-bold py-2.5 rounded-xl"
-            style={{ background: st.accent_color || "#2563eb", color: "#fff" }}
-          >
-            {ad.cta_label || "Découvrir"}
-          </button>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

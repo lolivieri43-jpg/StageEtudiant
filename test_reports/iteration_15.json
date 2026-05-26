@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 15 — Phase I (rich media posts: mp4/webm/mov + docx/xlsx/pptx + PDF, media[], link_preview Open Graph) + Phase J (message attachments) + Étape 2 (AdBuilder drag-and-drop with @dnd-kit, 7 block types) + Ad rate-limit IP dedup all fully validated. 14/14 backend pytest passed. Frontend: /feed composer renders 3 upload buttons + auto link-preview on URL paste (Wikipedia preview visible), existing posts render media + linkpreview cards correctly, /messages shows paperclip + PDF attachment bubble, /ads/new mode toggle works with full AdBuilder (palette/canvas/properties), 7 block types add/select/delete properly, composer-mode fallback fields (title/category/short_text) accessible.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/messages-rt", "issue": "last_message expression uses ambiguous operator precedence: `data.content or ('📎 ' + (attachments[0]['filename'] or 'Pièce jointe') if attachments else '')`. Currently works correctly because Python evaluates the ternary first, but the parentheses are confusing and could break if refactored. Recommend explicit parens: `data.content or (('📎 ' + ...) if attachments else '')`."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/feed link-preview card", "issues": ["When image fails to load (e.g. example.com has no og:image), the broken <img> placeholder still renders inside the card, leaving an empty grey box. Consider hiding the <img> on onError or only rendering when image is non-empty/HEAD-validated."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter15_media_attachments.py",
+    "/app/test_reports/pytest/pytest_iter15.xml"
+  ],
+  "action_items": [
+    "(Optional, P3) Refactor last_message expression in send_message_rt with explicit parentheses for clarity.",
+    "(Optional, P3) Hide broken link-preview image (onError or conditional) in PostCard linkpreview block when og:image is missing/404."
+  ],
+  "critical_code_review_comments": [
+    "ads_routes.py _dedup_track uses an in-collection key but has NO TTL index on ad_tracking_dedup.expires_at — relies on lazy _gc_dedup() on each /view call. Under load this is wasteful (delete_many on every view) and fragile. Recommend creating a MongoDB TTL index: `db.ad_tracking_dedup.create_index('expires_at', expireAfterSeconds=0)` once at startup and dropping the _gc_dedup() call.",
+    "server.py fetch_link_preview uses synchronous `requests.get` inside an async endpoint with timeout=8s — this blocks the event loop for up to 8s per request. Wrap in `asyncio.to_thread(...)` or switch to `httpx.AsyncClient` to avoid blocking the worker.",
+    "server.py fetch_link_preview regex parsing of HTML is fragile (won't handle attributes in different order, single-quoted props with embedded escapes, JSON-LD-only metadata, charset issues). Consider beautifulsoup4 (already a common dep) for robust og: tag extraction.",
+    "server.py upload_file does not validate magic bytes — a renamed .exe → .png will still be accepted as image/png based on extension alone. For user-uploaded media, sniff the first bytes (python-magic) to harden against extension spoofing.",
+    "server.py upload_file performs `await file.read()` of the full payload into memory (up to 50MB for video). For multiple concurrent uploads this can exhaust container RAM. Use streaming upload to object storage or enforce request-size limit at the ingress.",
+    "FeedPage.jsx — link-preview is fetched on every keystroke after a URL is typed (debounce 1.2s exists). However the call is repeated for the same URL when typing more text after the URL. Recommend caching last URL fetched and skipping if unchanged.",
+    "AdBuilder.jsx — palette buttons increase block count but no max-block guard. A user can spam 1000 blocks and the canvas/dnd-kit will become unresponsive. Recommend a maxBlocks=20 cap or warning."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter15_media_attachments.py",
+    "/app/test_reports/iteration_15.json"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% — feed composer + messages + AdBuilder all functional"},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234!, hr@datalab.fr/Demo1234!, lucas.martin@email.fr/Demo1234! — all verified.",
+  "seed_data_creation": "Backend tests uploaded several small TEST_ media files (png/mp4/webm/mov/docx/xlsx/pptx/pdf) under kind=post|doc, created 1 TEST_ post with media+link_preview, sent 1 PDF-attachment message from candidate→TechNova. View/click trackers were exercised on the published TechNova ad (dedup correctly prevented inflation; delta=0 on view confirms working dedup window).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter15 fully green. Phase I: upload accepts mp4/webm/mov/docx/xlsx/pptx in addition to image/pdf; max_bytes enforced per MIME (50MB videos, 15MB PDF, 8MB images); .exe rejected with 400. POST /api/posts persists media[] + link_preview correctly; /posts/link-preview extracts og: from Wikipedia (title='Stage (formation) — Wikipédia', domain='fr.wikipedia.org'). GET /api/files/{id} is public for kind in (avatar/banner/post/ad/deal/feed). Phase J: /messages-rt accepts attachments[]; last_message='📎 filename' when content is empty. Ad rate-limit: ad_tracking_dedup collection prevents 5 successive same-IP view/click from incrementing more than once (in preview env we saw delta=0 on view because dedup entry from a prior test was still alive — proves 1h dedup works). Frontend AdBuilder has DndContext+SortableContext+RenderBlocks; mode toggle simple/composer; 7 block types (heading/text/image/logo/button/promo_code/link); properties panel updates per selected block; composer-mode keeps title/category/short_text fields visible. There is an open visual issue: when link_preview image is empty/broken, broken <img> shows in PostCard card. Minor backend cleanup items captured in critical_code_review_comments (TTL index for dedup, async link-preview fetch, magic-byte sniffing).",
+  "rca of the issue": "N/A — no failing tests. Only minor recommendations."
+}

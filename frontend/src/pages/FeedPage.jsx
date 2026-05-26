@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { Heart, MessageCircle, Share2, Send, Image as ImageIcon } from "lucide-react";
+import { Heart, MessageCircle, Share2, Send, Image as ImageIcon, Video, FileText, Link as LinkIcon, X, Loader2, Paperclip } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
+import { toast } from "sonner";
 
 export default function FeedPage() {
   const { user } = useAuth();
@@ -15,21 +16,84 @@ export default function FeedPage() {
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("general");
   const [posting, setPosting] = useState(false);
+  const [media, setMedia] = useState([]); // [{type, url, file_id, filename, mime, size}]
+  const [linkPreview, setLinkPreview] = useState(null);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  const linkUrlSeen = useRef("");
 
   const load = async () => {
     const { data } = await api.get("/posts");
     setPosts(data);
   };
-
   useEffect(() => { load(); }, []);
 
+  // Detect URLs in content for link preview (debounced)
+  useEffect(() => {
+    if (!content || media.length || linkPreview) return;
+    const urlMatch = content.match(/https?:\/\/[^\s]+/i);
+    if (!urlMatch) return;
+    const url = urlMatch[0].replace(/[.,;!?]+$/, "");
+    if (url === linkUrlSeen.current) return;
+    linkUrlSeen.current = url;
+    setLinkLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.post("/posts/link-preview", { url });
+        if (data?.url) setLinkPreview(data);
+      } catch { /* silent */ }
+      finally { setLinkLoading(false); }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [content, media.length, linkPreview]);
+
+  const upload = async (file, type) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { data } = await api.post(`/upload?kind=post`, form, { headers: { "Content-Type": "multipart/form-data" } });
+      const API = process.env.REACT_APP_BACKEND_URL || "";
+      const fullUrl = data.url.startsWith("http") ? data.url : `${API}${data.url}`;
+      setMedia(m => [...m, {
+        type, url: fullUrl, file_id: data.file_id, filename: data.filename,
+        mime: data.content_type, size: data.size,
+      }]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Échec de l'upload");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onPick = (accept, type) => () => {
+    if (!fileInputRef.current) return;
+    fileInputRef.current.accept = accept;
+    fileInputRef.current.dataset.type = type;
+    fileInputRef.current.click();
+  };
+
+  const handleFile = (e) => {
+    const f = e.target.files?.[0];
+    if (f) upload(f, e.target.dataset.type || "image");
+    e.target.value = "";
+  };
+
+  const removeMedia = (i) => setMedia(m => m.filter((_, idx) => idx !== i));
+
   const publish = async () => {
-    if (!content.trim()) return;
+    if (!content.trim() && media.length === 0) return;
     setPosting(true);
     try {
-      await api.post("/posts", { content, category });
+      await api.post("/posts", { content, category, media, link_preview: linkPreview });
       setContent("");
+      setMedia([]);
+      setLinkPreview(null);
+      linkUrlSeen.current = "";
       load();
+      toast.success("Publication envoyée");
     } finally {
       setPosting(false);
     }
@@ -58,16 +122,85 @@ export default function FeedPage() {
                   rows={3}
                   className="rounded-xl resize-none"
                 />
-                <div className="flex items-center justify-between mt-3">
-                  <select value={category} onChange={(e) => setCategory(e.target.value)} className="text-xs rounded-full bg-slate-100 px-3 py-1.5 outline-none" data-testid="post-category">
-                    <option value="general">Publication générale</option>
-                    <option value="annonce">Annonce</option>
-                    <option value="recherche">Recherche urgente</option>
-                    <option value="conseil">Conseil</option>
-                  </select>
-                  <Button onClick={publish} disabled={posting || !content.trim()} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="publish-post">
-                    <Send className="w-4 h-4 mr-1" />Publier
-                  </Button>
+
+                {/* Media previews */}
+                {media.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mt-3" data-testid="media-previews">
+                    {media.map((m, i) => (
+                      <div key={i} className="relative rounded-xl overflow-hidden bg-slate-100 group">
+                        {m.type === "image" && <img src={m.url} alt="" className="w-full h-32 object-cover" />}
+                        {m.type === "video" && (
+                          <div className="w-full h-32 grid place-items-center bg-slate-900 text-white">
+                            <Video className="w-6 h-6" />
+                            <div className="text-[10px] truncate max-w-full px-2">{m.filename}</div>
+                          </div>
+                        )}
+                        {m.type === "pdf" && (
+                          <div className="w-full h-32 grid place-items-center bg-rose-50 text-rose-700">
+                            <FileText className="w-6 h-6" />
+                            <div className="text-[10px] truncate max-w-full px-2">{m.filename}</div>
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeMedia(i)}
+                          className="absolute top-1 right-1 w-6 h-6 rounded-full bg-slate-900/70 text-white grid place-items-center hover:bg-slate-900"
+                          data-testid={`remove-media-${i}`}>
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Link preview */}
+                {linkLoading && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="w-3 h-3 animate-spin" />Chargement de l'aperçu du lien…
+                  </div>
+                )}
+                {linkPreview && (
+                  <div className="mt-3 border border-slate-200 rounded-xl p-3 flex gap-3 relative" data-testid="link-preview">
+                    {linkPreview.image && <img src={linkPreview.image} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] uppercase tracking-wide text-slate-400">{linkPreview.domain}</div>
+                      <div className="font-bold text-sm text-slate-900 truncate">{linkPreview.title}</div>
+                      <div className="text-xs text-slate-500 line-clamp-2">{linkPreview.description}</div>
+                    </div>
+                    <button onClick={() => setLinkPreview(null)} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-slate-100 grid place-items-center hover:bg-slate-200">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between mt-3 flex-wrap gap-2">
+                  <div className="flex items-center gap-1">
+                    <button onClick={onPick("image/*", "image")} disabled={uploading} className="p-2 rounded-full hover:bg-slate-100 text-slate-600 disabled:opacity-50" data-testid="upload-image" title="Ajouter une image">
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+                    <button onClick={onPick("video/*", "video")} disabled={uploading} className="p-2 rounded-full hover:bg-slate-100 text-slate-600 disabled:opacity-50" data-testid="upload-video" title="Ajouter une vidéo">
+                      <Video className="w-4 h-4" />
+                    </button>
+                    <button onClick={onPick(".pdf,application/pdf", "pdf")} disabled={uploading} className="p-2 rounded-full hover:bg-slate-100 text-slate-600 disabled:opacity-50" data-testid="upload-pdf" title="Ajouter un PDF">
+                      <FileText className="w-4 h-4" />
+                    </button>
+                    <span className="w-px h-5 bg-slate-200 mx-1" />
+                    <span className="text-[10px] text-slate-400 hidden sm:inline">
+                      <LinkIcon className="w-3 h-3 inline mr-0.5" />Collez un lien dans le texte pour l'aperçu
+                    </span>
+                    {uploading && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                    <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} data-testid="post-file-input" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="text-xs rounded-full bg-slate-100 px-3 py-1.5 outline-none" data-testid="post-category">
+                      <option value="general">Général</option>
+                      <option value="annonce">Annonce</option>
+                      <option value="recherche">Recherche</option>
+                      <option value="conseil">Conseil</option>
+                    </select>
+                    <Button onClick={publish} disabled={posting || uploading || (!content.trim() && media.length === 0)} className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="publish-post">
+                      <Send className="w-4 h-4 mr-1" />Publier
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -107,6 +240,7 @@ const PostCard = ({ post, user, onLike }) => {
     general: null,
   };
   const cat = cats[post.category];
+  const mediaList = post.media && post.media.length ? post.media : (post.image ? [{ type: "image", url: post.image }] : []);
 
   return (
     <div className="card-soft p-5" data-testid={`post-${post.post_id}`}>
@@ -125,7 +259,27 @@ const PostCard = ({ post, user, onLike }) => {
         </div>
       </div>
       <p className="text-slate-700 leading-relaxed mb-4 whitespace-pre-wrap">{post.content}</p>
-      {post.image && <img src={post.image} alt="" className="rounded-xl mb-4 w-full object-cover max-h-96" />}
+
+      {mediaList.length > 0 && (
+        <div className={`grid gap-2 mb-4 ${mediaList.length > 1 ? "grid-cols-2" : "grid-cols-1"}`} data-testid={`media-${post.post_id}`}>
+          {mediaList.map((m, i) => (
+            <PostMedia key={i} m={m} />
+          ))}
+        </div>
+      )}
+
+      {post.link_preview && (
+        <a href={post.link_preview.url} target="_blank" rel="noopener noreferrer"
+           className="block border border-slate-200 rounded-xl p-3 mb-4 flex gap-3 hover:bg-slate-50" data-testid={`linkpreview-${post.post_id}`}>
+          {post.link_preview.image && <img src={post.link_preview.image} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" />}
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">{post.link_preview.domain}</div>
+            <div className="font-bold text-sm text-slate-900 truncate">{post.link_preview.title || post.link_preview.url}</div>
+            {post.link_preview.description && <div className="text-xs text-slate-500 line-clamp-2">{post.link_preview.description}</div>}
+          </div>
+        </a>
+      )}
+
       <div className="flex items-center gap-1 pt-3 border-t border-slate-100">
         <button onClick={onLike} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-slate-50 text-sm ${liked ? "text-rose-500" : "text-slate-500"}`} data-testid={`like-${post.post_id}`}>
           <Heart className={`w-4 h-4 ${liked ? "fill-current" : ""}`} />{post.likes?.length || 0}
@@ -159,3 +313,32 @@ const PostCard = ({ post, user, onLike }) => {
     </div>
   );
 };
+
+function PostMedia({ m }) {
+  if (m.type === "image") {
+    return <img src={m.url} alt="" className="rounded-xl w-full object-cover max-h-96" />;
+  }
+  if (m.type === "video") {
+    return (
+      <video controls preload="metadata" className="rounded-xl w-full max-h-96 bg-slate-900">
+        <source src={m.url} type={m.mime || "video/mp4"} />
+        Votre navigateur ne supporte pas la lecture vidéo.
+      </video>
+    );
+  }
+  if (m.type === "pdf") {
+    return (
+      <a href={m.url} target="_blank" rel="noopener noreferrer"
+         className="flex items-center gap-3 p-4 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-100">
+        <div className="w-12 h-12 rounded-xl bg-rose-100 grid place-items-center text-rose-600 shrink-0">
+          <FileText className="w-6 h-6" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-rose-900 truncate">{m.filename || "Document PDF"}</div>
+          <div className="text-xs text-rose-700">{m.size ? `${Math.round(m.size/1024)} ko` : "PDF"} · Cliquez pour ouvrir</div>
+        </div>
+      </a>
+    );
+  }
+  return null;
+}

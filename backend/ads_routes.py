@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 AdStatus = Literal["draft", "pending", "published", "refused", "suspended", "expired"]
@@ -185,14 +185,46 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
         return {"ok": True}
 
     # ---------- TRACKING ----------
+    async def _dedup_track(ad_id: str, action: str, ip: str) -> bool:
+        """Return True if this (ad_id, action, ip) hasn't been counted in the last hour."""
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        key = f"{ad_id}:{action}:{ip}"
+        # Try insert; if duplicate, skip increment
+        try:
+            await db.ad_tracking_dedup.insert_one({
+                "_id": key,
+                "ad_id": ad_id,
+                "action": action,
+                "ip": ip,
+                "expires_at": now + timedelta(hours=1),
+                "created_at": now,
+            })
+            return True
+        except Exception:
+            return False
+
+    async def _gc_dedup():
+        """Best-effort cleanup of expired dedup keys (no TTL index required)."""
+        try:
+            now = datetime.now(timezone.utc)
+            await db.ad_tracking_dedup.delete_many({"expires_at": {"$lt": now}})
+        except Exception:
+            pass
+
     @api_router.post("/ads/{ad_id}/view")
-    async def track_view(ad_id: str):
-        await db.ads.update_one({"ad_id": ad_id}, {"$inc": {"views": 1}})
+    async def track_view(ad_id: str, request: Request):
+        ip = request.client.host if request.client else "unknown"
+        if await _dedup_track(ad_id, "view", ip):
+            await db.ads.update_one({"ad_id": ad_id}, {"$inc": {"views": 1}})
+        await _gc_dedup()
         return {"ok": True}
 
     @api_router.post("/ads/{ad_id}/click")
-    async def track_click(ad_id: str):
-        await db.ads.update_one({"ad_id": ad_id}, {"$inc": {"clicks": 1}})
+    async def track_click(ad_id: str, request: Request):
+        ip = request.client.host if request.client else "unknown"
+        if await _dedup_track(ad_id, "click", ip):
+            await db.ads.update_one({"ad_id": ad_id}, {"$inc": {"clicks": 1}})
         return {"ok": True}
 
     # ---------- ADMIN ----------
