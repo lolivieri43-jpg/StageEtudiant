@@ -158,7 +158,26 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Rate limiting auth + protection brute-force
 - Split server.py en routers par domaine
 
-## Iteration 14 (2026-02) — Bons plans : workflow de validation admin + Publicités sponsorisées
+## Iteration 15 (2026-02) — Phase I + J + Étape 2 (drag-drop) + Rate-limit
+- ✅ **Phase I — Médias riches fil social** :
+  - Upload élargi : `mp4`/`webm`/`mov` (vidéos jusqu'à 50 Mo), `pdf` (15 Mo), `docx`/`xlsx`/`pptx`, images 8 Mo
+  - `POST /api/posts` accepte `media: [{type, url, file_id, filename, mime, size}]` + `link_preview: {url, title, description, image, domain}`
+  - `POST /api/posts/link-preview` → extraction Open Graph (avec cache 7j dans `link_preview_cache`, fetch en `asyncio.to_thread`)
+  - `GET /api/files/{id}` rendu public pour `kind ∈ (avatar, banner, post, ad, deal, feed)`
+  - FeedPage : composer avec 3 boutons upload (image/vidéo/PDF), détection automatique des URLs collées avec aperçu, rendu de vidéos `<video controls>` et PDFs cliquables
+- ✅ **Phase J — Pièces jointes messagerie** :
+  - `MessageIn.attachments: List[MessageAttachment]` (compat avec champ `attachment` legacy)
+  - WebSocket push inchangé (transmet `attachments[]`)
+  - MessagesPage : icône trombone (paperclip) ouvre le file picker, prévisualisation des pendingAttachments avec X, rendu en bulle ("MessageAttachmentView") : image/vidéo/PDF
+- ✅ **Étape 2 — Éditeur drag-and-drop des publicités** :
+  - `@dnd-kit/core` + `@dnd-kit/sortable` + `@dnd-kit/utilities` installés
+  - Nouveau composant `AdBuilder` : palette gauche (7 types : heading/text/image/logo/button/promo_code/link), canvas central trié, propriétés à droite (contenu/taille/alignement/couleur/URL)
+  - Toggle `Mode simple / Composer` dans `/ads/new`
+  - `RenderBlocks` rendu côté preview + dans `SponsoredAdPreview` (fallback layout simple si pas de blocks)
+- ✅ **Rate-limit IP** : collection `ad_tracking_dedup` + TTL index 1h sur `expires_at` → un même couple (ad_id, action, IP) n'est compté qu'une fois par heure
+- ✅ **Améliorations** : index Mongo ajoutés (ad_tracking_dedup, link_preview_cache, ads.status/company_id), gestion `onError` sur images broken dans link previews
+- ✅ **Tests** : 14/14 backend pytest (`test_iter15_media_attachments.py`), 5/5 frontend critique (iteration_15.json)
+
 - ✅ **Workflow deals refondu** : tous les bons plans (entreprise + étudiant) passent automatiquement en `status="pending"` à la création. Nouveau statut `suspended` ajouté. L'édition d'un deal validé/refusé/suspendu par l'auteur le repasse en `pending` (re-validation).
 - ✅ **Endpoints admin deals** : `GET /api/admin/deals?status=...&q=...` (avec compteurs par statut), `POST /api/admin/deals/{id}/validate` actions `approve|refuse|suspend|reactivate|expire` + raison de modération + notification.
 - ✅ **Nouvelle entité `ads`** (collection Mongo `ads`) : `/app/backend/ads_routes.py` — CRUD complet (`POST /api/ads`, `GET /api/ads/mine`, `GET /api/ads/public`, `PATCH/DELETE /api/ads/{id}`) + tracking views/clicks anonymes.
@@ -176,11 +195,12 @@ Build a modern, professional, responsive French platform connecting companies wi
 - ✅ **Admin Sources API** : carte `admin-sources-api` dans `/admin` avec table 11 sources + boutons refresh/purge
 
 ## Next Tasks
-1. **Phase I — Médias riches dans le fil social** : posts avec photos, vidéos, liens, PDFs (upload + preview + compression) — P1
-2. **Phase J — Pièces jointes messagerie** : extension WebSocket + collection `message_attachments` (PDF/DOCX/images) — P1
-3. **Éditeur drag-and-drop avancé pour ads** : palette de blocs (texte/image/logo/bouton/code promo/lien/bannière) avec @dnd-kit — P1
-4. Activation Jooble côté upstream (clé fournie retourne 403) — P3
-5. Location de l'actor Apify EURES (~$30/mois) ou alternative gratuite EURES — P3
-6. Rate-limit IP sur tracking ads (views/clicks) — P2
-7. Split server.py en routers par domaine (auth/users/offers/admin) — P2
-8. Modération admin (publications + signalements) — P2
+1. ✅ ~~Phase I — Médias riches fil social~~ (DONE iter 15)
+2. ✅ ~~Phase J — Pièces jointes messagerie~~ (DONE iter 15)
+3. ✅ ~~Éditeur drag-and-drop ads~~ (DONE iter 15)
+4. ✅ ~~Rate-limit IP tracking ads~~ (DONE iter 15)
+5. **Split server.py** en routers par domaine (auth/users/offers/admin) — P2 (gros refactor, ~4200 lignes)
+6. **Modération admin** : signalement de publications + comments + threads — P2
+7. **Activation Jooble** : contacter le support Jooble pour valider la clé (HTTP 403 actuellement) — P3
+8. **Location actor Apify EURES** (~$30/mois) ou scraper EURES maison — P3
+9. **Hardening** : magic-byte sniffing sur upload, streaming pour gros fichiers, Pydantic stricter validation pour ads (`min_length`, `HttpUrl`) — P3

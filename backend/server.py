@@ -577,10 +577,23 @@ async def fetch_link_preview(body: dict, user=Depends(get_current_user)):
         raise HTTPException(400, "URL requise")
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    try:
+
+    # Cache check
+    cache = await db.link_preview_cache.find_one({"url": url}, {"_id": 0})
+    if cache:
+        return cache
+
+    def _do_fetch():
         import requests as _rq
-        r = _rq.get(url, headers={"User-Agent": "Mozilla/5.0 StageEtudiant-LinkPreview/1.0"}, timeout=8, allow_redirects=True)
-        html = r.text[:300000]  # limit
+        return _rq.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 StageEtudiant-LinkPreview/1.0"},
+            timeout=8,
+            allow_redirects=True,
+        )
+    try:
+        r = await asyncio.to_thread(_do_fetch)
+        html = r.text[:300000]
     except Exception as e:
         raise HTTPException(400, f"Impossible de récupérer la page: {e}")
 
@@ -602,13 +615,20 @@ async def fetch_link_preview(body: dict, user=Depends(get_current_user)):
         p = urlparse(url)
         image = f"{p.scheme}://{p.netloc}{image}"
     parsed = urlparse(url)
-    return {
+    preview = {
         "url": url,
         "title": (title or "")[:200] or None,
         "description": (description or "")[:300] or None,
         "image": image,
         "domain": parsed.netloc,
     }
+    # Cache 7 days
+    await db.link_preview_cache.update_one(
+        {"url": url},
+        {"$set": {**preview, "cached_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return preview
 
 
 @api.get("/posts")
@@ -2561,6 +2581,13 @@ async def ensure_indexes():
         await db.profile_views.create_index([("viewed_user_id", 1), ("viewed_at", -1)])
         await db.profile_views.create_index([("viewer_user_id", 1), ("viewed_user_id", 1), ("viewed_at", -1)])
         await db.platform_stats_settings.create_index([("key", 1)], unique=True)
+        # TTL index for ad tracking dedup (expires_at field, 0 = use document's own field)
+        await db.ad_tracking_dedup.create_index("expires_at", expireAfterSeconds=0)
+        # Index for link-preview cache lookups
+        await db.link_preview_cache.create_index("url", unique=True)
+        # Ads indexes
+        await db.ads.create_index([("status", 1)])
+        await db.ads.create_index([("company_id", 1)])
         logger.info("Mongo indexes ensured")
     except Exception as e:
         logger.warning(f"Index creation failed: {e}")

@@ -160,7 +160,7 @@ export default function FeedPage() {
                 )}
                 {linkPreview && (
                   <div className="mt-3 border border-slate-200 rounded-xl p-3 flex gap-3 relative" data-testid="link-preview">
-                    {linkPreview.image && <img src={linkPreview.image} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" />}
+                    {linkPreview.image && <img src={linkPreview.image} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
                     <div className="flex-1 min-w-0">
                       <div className="text-[10px] uppercase tracking-wide text-slate-400">{linkPreview.domain}</div>
                       <div className="font-bold text-sm text-slate-900 truncate">{linkPreview.title}</div>
@@ -268,17 +268,17 @@ const PostCard = ({ post, user, onLike }) => {
         </div>
       )}
 
-      {post.link_preview && (
-        <a href={post.link_preview.url} target="_blank" rel="noopener noreferrer"
-           className="block border border-slate-200 rounded-xl p-3 mb-4 flex gap-3 hover:bg-slate-50" data-testid={`linkpreview-${post.post_id}`}>
-          {post.link_preview.image && <img src={post.link_preview.image} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" />}
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] uppercase tracking-wide text-slate-400">{post.link_preview.domain}</div>
-            <div className="font-bold text-sm text-slate-900 truncate">{post.link_preview.title || post.link_preview.url}</div>
-            {post.link_preview.description && <div className="text-xs text-slate-500 line-clamp-2">{post.link_preview.description}</div>}
-          </div>
-        </a>
-      )}
+        {post.link_preview && (
+          <a href={post.link_preview.url} target="_blank" rel="noopener noreferrer"
+             className="block border border-slate-200 rounded-xl p-3 mb-4 flex gap-3 hover:bg-slate-50" data-testid={`linkpreview-${post.post_id}`}>
+            {post.link_preview.image && <img src={post.link_preview.image} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-wide text-slate-400">{post.link_preview.domain}</div>
+              <div className="font-bold text-sm text-slate-900 truncate">{post.link_preview.title || post.link_preview.url}</div>
+              {post.link_preview.description && <div className="text-xs text-slate-500 line-clamp-2">{post.link_preview.description}</div>}
+            </div>
+          </a>
+        )}
 
       <div className="flex items-center gap-1 pt-3 border-t border-slate-100">
         <button onClick={onLike} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-slate-50 text-sm ${liked ? "text-rose-500" : "text-slate-500"}`} data-testid={`like-${post.post_id}`}>

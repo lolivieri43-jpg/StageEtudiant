@@ -186,11 +186,11 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
 
     # ---------- TRACKING ----------
     async def _dedup_track(ad_id: str, action: str, ip: str) -> bool:
-        """Return True if this (ad_id, action, ip) hasn't been counted in the last hour."""
+        """Return True if this (ad_id, action, ip) hasn't been counted in the last hour.
+        Relies on a TTL index on ad_tracking_dedup.expires_at to clean up entries automatically."""
         from datetime import timedelta
         now = datetime.now(timezone.utc)
         key = f"{ad_id}:{action}:{ip}"
-        # Try insert; if duplicate, skip increment
         try:
             await db.ad_tracking_dedup.insert_one({
                 "_id": key,
@@ -204,20 +204,12 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
         except Exception:
             return False
 
-    async def _gc_dedup():
-        """Best-effort cleanup of expired dedup keys (no TTL index required)."""
-        try:
-            now = datetime.now(timezone.utc)
-            await db.ad_tracking_dedup.delete_many({"expires_at": {"$lt": now}})
-        except Exception:
-            pass
-
     @api_router.post("/ads/{ad_id}/view")
     async def track_view(ad_id: str, request: Request):
         ip = request.client.host if request.client else "unknown"
         if await _dedup_track(ad_id, "view", ip):
             await db.ads.update_one({"ad_id": ad_id}, {"$inc": {"views": 1}})
-        await _gc_dedup()
+        # TTL index on ad_tracking_dedup.expires_at handles cleanup automatically
         return {"ok": True}
 
     @api_router.post("/ads/{ad_id}/click")
