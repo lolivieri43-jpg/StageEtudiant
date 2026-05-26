@@ -144,7 +144,7 @@ export default function AdminAdsPage() {
 }
 
 function AdRow({ ad: a, onModerate, onDelete }) {
-  const ctr = (a.views || 0) > 0 ? ((a.clicks || 0) / a.views * 100).toFixed(1) : "0.0";
+  const ctr = (a.views || 0) > 0 ? Math.min((a.clicks || 0) / a.views * 100, 100).toFixed(1) : "0.0";
   return (
     <div className="card-soft p-4 flex items-start gap-3" data-testid={`ad-row-${a.ad_id}`}>
       <div className="w-16 h-16 rounded-xl overflow-hidden bg-gradient-to-br from-violet-100 to-blue-100 grid place-items-center font-bold text-violet-600 shrink-0">

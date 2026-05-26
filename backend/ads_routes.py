@@ -64,12 +64,12 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
 
     # ---------- Company quota helper ----------
     async def _company_quota_ok(company_id: str) -> tuple[bool, int, int]:
-        """Return (allowed, current_count, max_allowed)."""
+        """Return (allowed, current_count, max_allowed). Drafts are NOT counted toward quota."""
         pro = await company_subscription_active(company_id)
         max_allowed = 9999 if pro else 1
         current = await db.ads.count_documents({
             "company_id": company_id,
-            "status": {"$in": ["draft", "pending", "published", "suspended"]},
+            "status": {"$in": ["pending", "published", "suspended"]},
         })
         return (current < max_allowed, current, max_allowed)
 
@@ -109,9 +109,10 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
             raise HTTPException(403, "Réservé aux entreprises")
         ads = await db.ads.find({"company_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
         pro = await company_subscription_active(user["user_id"])
+        active = [a for a in ads if a["status"] in ("pending", "published", "suspended")]
         return {
             "ads": ads,
-            "quota": {"max": (9999 if pro else 1), "used": len([a for a in ads if a["status"] in ("draft","pending","published","suspended")])},
+            "quota": {"max": (9999 if pro else 1), "used": len(active)},
             "pro": pro,
         }
 
@@ -162,6 +163,13 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
             upd["status"] = "pending"
         # Author can also submit a draft for validation
         if not is_admin and ad.get("status") == "draft" and data.get("submit"):
+            # Re-check quota when promoting a draft to pending
+            allowed, current, max_a = await _company_quota_ok(user["user_id"])
+            if not allowed:
+                raise HTTPException(
+                    402,
+                    f"Quota atteint ({current}/{max_a}). Passez à l'offre Pro pour publier davantage de publicités."
+                )
             upd["status"] = "pending"
         await db.ads.update_one({"ad_id": ad_id}, {"$set": upd})
         return {"ok": True, "status": upd.get("status", ad.get("status"))}
@@ -220,7 +228,8 @@ def register_ads_routes(api_router, db, get_current_user, notify, company_subscr
             }},
         ]).to_list(1)
         stats_doc = agg[0] if agg else {"total_views": 0, "total_clicks": 0, "ads": 0}
-        ctr = (stats_doc["total_clicks"] / stats_doc["total_views"] * 100) if stats_doc.get("total_views") else 0.0
+        # Cap CTR at 100% — clicks can exceed views from non-deduped tracking, but UX-wise CTR > 100% is misleading
+        ctr = min(stats_doc["total_clicks"] / stats_doc["total_views"] * 100, 100.0) if stats_doc.get("total_views") else 0.0
         stats_doc["ctr"] = round(ctr, 2)
         stats_doc.pop("_id", None)
 

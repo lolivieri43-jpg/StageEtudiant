@@ -158,18 +158,29 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Rate limiting auth + protection brute-force
 - Split server.py en routers par domaine
 
-## Next Tasks
-1. **Phase I — Médias riches dans le fil social** : posts avec photos, vidéos, liens, PDFs (upload + preview + compression)
-2. **Phase J — Pièces jointes messagerie** : extension WebSocket + collection `message_attachments` (PDF/DOCX/images)
-3. Activation Jooble côté upstream (clé fournie retourne 403) + APIFY_TOKEN pour activer EURES
-4. Split server.py en routers par domaine (auth/users/offers/admin)
-5. Modération admin (publications + signalements)
+## Iteration 14 (2026-02) — Bons plans : workflow de validation admin + Publicités sponsorisées
+- ✅ **Workflow deals refondu** : tous les bons plans (entreprise + étudiant) passent automatiquement en `status="pending"` à la création. Nouveau statut `suspended` ajouté. L'édition d'un deal validé/refusé/suspendu par l'auteur le repasse en `pending` (re-validation).
+- ✅ **Endpoints admin deals** : `GET /api/admin/deals?status=...&q=...` (avec compteurs par statut), `POST /api/admin/deals/{id}/validate` actions `approve|refuse|suspend|reactivate|expire` + raison de modération + notification.
+- ✅ **Nouvelle entité `ads`** (collection Mongo `ads`) : `/app/backend/ads_routes.py` — CRUD complet (`POST /api/ads`, `GET /api/ads/mine`, `GET /api/ads/public`, `PATCH/DELETE /api/ads/{id}`) + tracking views/clicks anonymes.
+- ✅ **Quota** : gratuit = 1 publicité active (pending+published+suspended), Pro = 9999 (illimité). Brouillons exclus du quota. Re-vérification du quota sur draft→submit.
+- ✅ **Admin ads** : `GET /api/admin/ads` (compteurs + stats agrégées: total_views, total_clicks, ctr cappé à 100%), `POST /api/admin/ads/{id}/validate`.
+- ✅ **Pages frontend** : `/admin/deals` (modération deals, 7 onglets statut), `/admin/ads` (modération + 4 stat tiles), `/ads/new` (éditeur avec 4 templates pro, 3 color pickers, 3 alignements, **aperçu desktop/mobile**), `/ads/mine` (liste + bannière quota), `/ads/:id/edit` (re-édition → re-validation).
+- ✅ **Intégration** : section "Publicités sponsorisées" dans `/deals` avec carte cliquable (tracking auto views+clicks), badge "Sponsorisé" et liens vers le CTA externe. Header → menus admin/company dédiés.
+- ✅ **Tests** : 22/22 backend pytest pass (`test_iter14_deals_ads.py`), 5/5 frontend critique pass (iteration_14.json).
 
 ## Iteration 13 (2026-02) — Phase H : APIs externes avec clés
 - ✅ **Adzuna FR** : `/app/backend/external_keyed.py::fetch_adzuna()` → 100 offres réelles par refresh (cache 12h)
-- ✅ **Jooble** : implémenté, mais clé retourne HTTP 403 (à activer côté Jooble)
-- ✅ **EURES via Apify** : implémenté `fetch_eures_apify()`, skip silencieux tant que `APIFY_TOKEN` absent
+- ⚠️ **Jooble** : implémenté, mais clé retourne HTTP 403 upstream (à activer côté Jooble) — retiré du dropdown frontend
+- ⚠️ **EURES via Apify** : implémenté, mais actor Apify EURES est payant (HTTP 403 "rent a paid Actor")
 - ✅ **Endpoints** : `GET /api/external-offers/keyed`, `GET /api/external-offers/all` (merge keyless+keyed dédupliqué)
-- ✅ **Admin Sources API** : carte `admin-sources-api` dans `/admin` avec table 11 sources (état, dernier appel, erreurs, offres en cache) + boutons `Forcer le refresh` et `Vider cache offres ext.`
-- ✅ **Tests** : 11/11 backend pass (`/app/backend/tests/test_iter13_phaseH.py`), 5/5 frontend critique pass (iteration_13.json)
-- 📊 **Volume agrégé** : 222 offres externes (Adzuna 100 + Ashby 48 + Arbeitnow 47 + RemoteOK 12 + Remotive 10 + Jobicy 5), 268 sur `/offers` avec interne+LBA+FT
+- ✅ **Admin Sources API** : carte `admin-sources-api` dans `/admin` avec table 11 sources + boutons refresh/purge
+
+## Next Tasks
+1. **Phase I — Médias riches dans le fil social** : posts avec photos, vidéos, liens, PDFs (upload + preview + compression) — P1
+2. **Phase J — Pièces jointes messagerie** : extension WebSocket + collection `message_attachments` (PDF/DOCX/images) — P1
+3. **Éditeur drag-and-drop avancé pour ads** : palette de blocs (texte/image/logo/bouton/code promo/lien/bannière) avec @dnd-kit — P1
+4. Activation Jooble côté upstream (clé fournie retourne 403) — P3
+5. Location de l'actor Apify EURES (~$30/mois) ou alternative gratuite EURES — P3
+6. Rate-limit IP sur tracking ads (views/clicks) — P2
+7. Split server.py en routers par domaine (auth/users/offers/admin) — P2
+8. Modération admin (publications + signalements) — P2

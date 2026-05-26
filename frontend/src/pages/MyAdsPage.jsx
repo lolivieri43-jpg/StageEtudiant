@@ -87,7 +87,7 @@ export default function MyAdsPage() {
 
         <div className="space-y-3">
           {data.ads.map(a => {
-            const ctr = (a.views || 0) > 0 ? ((a.clicks || 0) / a.views * 100).toFixed(1) : "0.0";
+            const ctr = (a.views || 0) > 0 ? Math.min((a.clicks || 0) / a.views * 100, 100).toFixed(1) : "0.0";
             return (
               <div key={a.ad_id} className="card-soft p-4 flex items-start gap-3" data-testid={`my-ad-${a.ad_id}`}>
                 <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-violet-100 to-blue-100 overflow-hidden grid place-items-center font-bold text-violet-600 shrink-0">
