@@ -21,7 +21,6 @@ const SOURCES = [
   { id: "La Bonne Alternance", label: "La Bonne Alternance ★" },
   { id: "FranceTravail", label: "France Travail ✓" },
   { id: "Adzuna", label: "Adzuna" },
-  { id: "Jooble", label: "Jooble" },
   { id: "EURES", label: "EURES (UE)" },
   { id: "Ashby", label: "Ashby" },
   { id: "Arbeitnow", label: "Arbeitnow" },

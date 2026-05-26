@@ -2,10 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { Tag, MapPin, Sparkles, Zap, Search, Plus, Bookmark, Share2 } from "lucide-react";
+import { Tag, MapPin, Sparkles, Zap, Search, Plus, Bookmark, Share2, Megaphone } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
+import { SponsoredAdPreview } from "./NewAdPage";
 
 const CATEGORIES = [
   { id: "", label: "Tous" },
@@ -23,6 +24,7 @@ export default function DealsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [deals, setDeals] = useState([]);
+  const [ads, setAds] = useState([]);
   const cat = params.get("category") || "";
   const city = params.get("city") || "";
   const q = params.get("q") || "";
@@ -33,6 +35,11 @@ export default function DealsPage() {
     if (city) p.set("city", city);
     if (q) p.set("q", q);
     api.get(`/deals?${p.toString()}`).then((r) => setDeals(r.data));
+    // Fetch ads for the same category/city
+    const ap = new URLSearchParams();
+    if (cat) ap.set("category", cat);
+    if (city) ap.set("city", city);
+    api.get(`/ads/public?${ap.toString()}`).then((r) => setAds(r.data || [])).catch(() => setAds([]));
   }, [cat, city, q]);
 
   const update = (k, v) => {
@@ -56,7 +63,12 @@ export default function DealsPage() {
             <p className="text-slate-500 mt-1">Réductions, codes promo et avantages près de chez toi</p>
           </div>
           {user && (
-            <Link to="/deals/new"><Button className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="new-deal-btn"><Plus className="w-4 h-4 mr-1" />Proposer un bon plan</Button></Link>
+            <div className="flex flex-wrap gap-2">
+              {user.role === "company" && (
+                <Link to="/ads/new"><Button variant="outline" className="rounded-full" data-testid="new-ad-link"><Megaphone className="w-4 h-4 mr-1" />Créer une publicité</Button></Link>
+              )}
+              <Link to="/deals/new"><Button className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="new-deal-btn"><Plus className="w-4 h-4 mr-1" />Proposer un bon plan</Button></Link>
+            </div>
           )}
         </div>
 
@@ -89,6 +101,17 @@ export default function DealsPage() {
         {boosted.length > 0 && (
           <Section title="Mis en avant" icon={Zap} color="violet" deals={boosted} badge="Mis en avant" badgeColor="bg-violet-100 text-violet-700" />
         )}
+        {ads.length > 0 && (
+          <div className="mb-8" data-testid="sponsored-ads-section">
+            <h2 className="flex items-center gap-2 text-lg font-bold mb-4 text-slate-900">
+              <Megaphone className="w-5 h-5 text-violet-500" />
+              Publicités sponsorisées <span className="text-slate-400 text-sm font-normal">({ads.length})</span>
+            </h2>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {ads.map(a => <SponsoredAdCard key={a.ad_id} ad={a} />)}
+            </div>
+          </div>
+        )}
         <Section title="Tous les bons plans" icon={Tag} color="blue" deals={regular} />
 
         {deals.length === 0 && (
@@ -118,8 +141,7 @@ const Section = ({ title, icon: Icon, color, deals, badge, badgeColor }) => {
   );
 };
 
-export const DealCard = ({ deal, badge, badgeColor }) => (
-  <Link to={`/deals/${deal.deal_id}`} className="card-soft overflow-hidden hover-lift hover:border-violet-300 block" data-testid={`deal-card-${deal.deal_id}`}>
+export const DealCard = ({ deal, badge, badgeColor }) => (  <Link to={`/deals/${deal.deal_id}`} className="card-soft overflow-hidden hover-lift hover:border-violet-300 block" data-testid={`deal-card-${deal.deal_id}`}>
     <div className="aspect-[16/9] bg-gradient-to-br from-violet-100 to-blue-100 relative overflow-hidden">
       {deal.image && <img src={deal.image} alt="" className="w-full h-full object-cover" />}
       {deal.discount && (
@@ -142,3 +164,25 @@ export const DealCard = ({ deal, badge, badgeColor }) => (
     </div>
   </Link>
 );
+
+function SponsoredAdCard({ ad }) {
+  const reportedView = React.useRef(false);
+  React.useEffect(() => {
+    if (reportedView.current) return;
+    reportedView.current = true;
+    api.post(`/ads/${ad.ad_id}/view`).catch(() => {});
+  }, [ad.ad_id]);
+
+  const handleClick = (e) => {
+    api.post(`/ads/${ad.ad_id}/click`).catch(() => {});
+    if (!ad.cta_url) e.preventDefault();
+  };
+
+  return (
+    <a href={ad.cta_url || "#"} target="_blank" rel="noopener noreferrer sponsored"
+       onClick={handleClick}
+       className="block hover-lift" data-testid={`ad-card-${ad.ad_id}`}>
+      <SponsoredAdPreview ad={ad} />
+    </a>
+  );
+}

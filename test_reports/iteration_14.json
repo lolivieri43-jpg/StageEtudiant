@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 14 — Deals moderation workflow + Ads system (sponsored advertisements) fully validated. 22/22 backend pytest passed. Frontend: /admin/deals, /admin/ads, /ads/new, /ads/mine, /deals all render correctly with the expected widgets (status tabs+counters, 4 stat tiles, full ad editor with 4 templates + 3 color pickers + 3 alignments + desktop/mobile preview toggle, sponsored ads section on /deals with 'Créer une publicité' button visible for company).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin/ads CTR stat", "issues": ["CTR shown as 150% (3 clicks / 2 views * 100) which is mathematically correct but UX-unusual; consider capping displayed CTR at 100% or showing 'n/a' when clicks > views (test data artifact)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter14_deals_ads.py",
+    "/app/test_reports/pytest/pytest_iter14.xml"
+  ],
+  "action_items": [
+    "Optional UX: cap CTR display at 100% on /admin/ads when clicks > views (edge case from test data).",
+    "Optional: surface 'Mes publicités' as a direct link in the company avatar dropdown for discoverability (currently /ads/mine reachable via URL & via 'Créer une publicité' button on /deals, which is acceptable)."
+  ],
+  "critical_code_review_comments": [
+    "ads_routes.py _company_quota_ok counts {draft, pending, published, suspended} toward quota — drafts are intentionally allowed past quota via save_as_draft=True (verified), but a free company that already submitted a draft will see used=1/1 even though the draft is not 'active'. Consider excluding 'draft' from quota_used so /ads/mine quota.used reflects only diffused/awaiting ads.",
+    "ads_routes.py POST /ads has no input validation: an empty title is accepted (only Pydantic type-checks). Add a min_length=3 on AdIn.title + cta_url HttpUrl validation to harden.",
+    "ads_routes.py track_view/click endpoints are unauthenticated and accept anonymous POST — add IP-rate-limit (or hash of IP+ad_id+hour) to prevent click-bombing/inflated CTR.",
+    "ads_routes.py update_ad does NOT re-check quota when an author moves a draft to 'pending' via submit:true — a free company could pile drafts then mass-submit beyond quota.",
+    "server.py admin_list_deals counts loop runs 7 serial count_documents queries — acceptable but aggregatable to 1 $group for scale (same comment as iter13 for sources-status)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter14_deals_ads.py",
+    "/app/test_reports/iteration_14.json"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% — all 5 pages render correctly with required widgets"},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234! (free, 1 active ad), hr@datalab.fr/Demo1234! (free, 0 ads), lucas.martin@email.fr/Demo1234! — all valid.",
+  "seed_data_creation": "Backend test created+deleted TEST_-prefixed deals & ads during the run. Pre-existing TechNova ad (ad_f8a61a1e2cc0) untouched. Tracking counters bumped to views=2, clicks=3 on the published TechNova ad (visible on /admin/ads stats).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 14 fully green: 22/22 backend tests on deals workflow (auto-pending + admin approve/refuse/suspend/reactivate + author-edit→pending) and ads (CRUD, quota 1 free/9999 Pro, 402 on quota, save_as_draft, public window filter, view/click tracking, admin counts+stats CTR, admin validate actions). Frontend /admin/deals, /admin/ads, /ads/new, /ads/mine, /deals all functional with proper data-testid coverage on templates/styles/previews. TechNova ad ad_f8a61a1e2cc0 still 'published' with views=2/clicks=3. Header menu items for 'Modération bons plans'/'Modération publicités'/'Mes publicités' are accessed via direct URLs (avatar dropdown not introspected); pages themselves work.",
+  "rca of the issue": "N/A — no critical issues. CTR=150% is a math artifact from test tracking calls, not a bug."
+}

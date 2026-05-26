@@ -960,7 +960,7 @@ PACKAGES = {
     "boost_company": {"amount": 10.00, "currency": "eur", "kind": "boost", "actor": "company", "days": 7},
 }
 
-DealStatus = Literal["draft", "pending", "published", "refused", "expired"]
+DealStatus = Literal["draft", "pending", "published", "refused", "suspended", "expired"]
 
 class DealIn(BaseModel):
     title: str
@@ -995,12 +995,11 @@ async def company_subscription_active(company_id: str) -> bool:
 
 @api.post("/deals")
 async def create_deal(data: DealIn, user=Depends(get_current_user)):
-    if user["role"] == "company":
-        if not await company_subscription_active(user["user_id"]):
-            raise HTTPException(402, "Abonnement Pro Bons Plans requis pour publier")
-        status = "published"
-    else:
-        status = "pending"  # student: needs admin validation
+    # All deals (company AND student) must be validated by admin before going public
+    status = "pending"
+    if user["role"] == "company" and not await company_subscription_active(user["user_id"]):
+        # Free companies can still propose, just like students, status pending
+        pass
     deal_id = f"deal_{uuid.uuid4().hex[:12]}"
     doc = {
         "deal_id": deal_id,
@@ -1081,16 +1080,17 @@ async def update_deal(deal_id: str, data: dict, user=Depends(get_current_user)):
     d = await db.deals.find_one({"deal_id": deal_id})
     if not d:
         raise HTTPException(404, "Introuvable")
-    if d["author_id"] != user["user_id"] and user["role"] != "admin":
+    is_admin = user["role"] == "admin"
+    if d["author_id"] != user["user_id"] and not is_admin:
         raise HTTPException(403, "Interdit")
-    if d["author_type"] == "company" and user["role"] != "admin":
-        if not await company_subscription_active(user["user_id"]):
-            raise HTTPException(402, "Abonnement requis")
     allowed = {"title", "description", "category", "city", "region", "image", "promo_code", "discount", "url", "expires_at"}
     upd = {k: v for k, v in data.items() if k in allowed}
+    # Author edits a validated/suspended deal => must be re-validated
+    if upd and not is_admin and d.get("status") in ("published", "suspended", "refused"):
+        upd["status"] = "pending"
     if upd:
         await db.deals.update_one({"deal_id": deal_id}, {"$set": upd})
-    return {"ok": True}
+    return {"ok": True, "status": upd.get("status", d.get("status"))}
 
 @api.delete("/deals/{deal_id}")
 async def delete_deal(deal_id: str, user=Depends(get_current_user)):
@@ -1132,16 +1132,64 @@ async def share_deal(deal_id: str):
 async def validate_deal(deal_id: str, body: dict, user=Depends(get_current_user)):
     if user["role"] != "admin":
         raise HTTPException(403, "Admin")
-    action = body.get("action")  # "approve" / "refuse" / "disable"
+    action = body.get("action")  # approve | refuse | suspend | reactivate | expire
     deal = await db.deals.find_one({"deal_id": deal_id})
     if not deal:
         raise HTTPException(404, "Introuvable")
-    new_status = {"approve": "published", "refuse": "refused", "disable": "expired"}.get(action)
+    new_status = {
+        "approve": "published",
+        "validate": "published",
+        "refuse": "refused",
+        "suspend": "suspended",
+        "reactivate": "published",
+        "disable": "expired",
+        "expire": "expired",
+    }.get(action)
     if not new_status:
         raise HTTPException(400, "Action invalide")
-    await db.deals.update_one({"deal_id": deal_id}, {"$set": {"status": new_status}})
-    await notify(deal["author_id"], "deal_validation", f"Votre bon plan \"{deal['title']}\" est {new_status}", f"/deals/{deal_id}")
-    return {"ok": True}
+    set_doc = {"status": new_status,
+               "moderated_by": user["user_id"],
+               "moderated_at": datetime.now(timezone.utc).isoformat()}
+    reason = (body.get("reason") or "").strip()
+    if reason:
+        set_doc["moderation_reason"] = reason
+    await db.deals.update_one({"deal_id": deal_id}, {"$set": set_doc})
+    msg_map = {
+        "published": f"Votre bon plan \"{deal['title']}\" a été validé ✓",
+        "refused": f"Votre bon plan \"{deal['title']}\" a été refusé" + (f" — {reason}" if reason else ""),
+        "suspended": f"Votre bon plan \"{deal['title']}\" a été suspendu" + (f" — {reason}" if reason else ""),
+        "expired": f"Votre bon plan \"{deal['title']}\" a expiré",
+    }
+    await notify(deal["author_id"], "deal_validation",
+                 msg_map.get(new_status, f"Statut: {new_status}"),
+                 f"/deals/{deal_id}")
+    return {"ok": True, "status": new_status}
+
+
+@api.get("/admin/deals")
+async def admin_list_deals(status: Optional[str] = None,
+                           q: Optional[str] = None,
+                           limit: int = 200,
+                           user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin")
+    query: dict = {}
+    if status and status != "all":
+        query["status"] = status
+    if q:
+        query["$or"] = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
+            {"author_name": {"$regex": q, "$options": "i"}},
+        ]
+    deals = await db.deals.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 500))
+    # Status counters for tabs
+    counts: dict = {}
+    for s in ("draft", "pending", "published", "refused", "suspended", "expired"):
+        counts[s] = await db.deals.count_documents({"status": s})
+    counts["all"] = await db.deals.count_documents({})
+    return {"deals": deals, "counts": counts}
+
 
 @api.get("/admin/deals/pending")
 async def admin_pending_deals(user=Depends(get_current_user)):
@@ -3739,6 +3787,13 @@ async def admin_clear_ft_cache(user=Depends(get_current_user)):
 
 
 app.include_router(ft_api)
+
+
+# ============ ADS / Publicités sponsorisées (Phase H+) ============
+from ads_routes import register_ads_routes
+ads_api = APIRouter(prefix="/api")
+register_ads_routes(ads_api, db, get_current_user, notify, company_subscription_active)
+app.include_router(ads_api)
 
 
 # ============ ITERATION 12: External Sources Aggregator + Diploma Levels + Cleanup ============

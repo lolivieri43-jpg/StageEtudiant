@@ -43,7 +43,7 @@ export default function NewDealPage() {
     setLoading(true);
     try {
       const { data } = await api.post("/deals", form);
-      toast.success(user.role === "candidate" ? "Bon plan envoyé en validation !" : "Bon plan publié !");
+      toast.success("Bon plan envoyé en validation — vérification sous 24h");
       navigate(`/deals/${data.deal_id}`);
     } catch (err) {
       if (err.response?.status === 402) {
@@ -72,20 +72,17 @@ export default function NewDealPage() {
             </div>
           </div>
         )}
-        {user.role === "company" && subActive === false && (
-          <div className="card-soft p-4 mb-6 bg-rose-50 border-rose-200 flex gap-3">
-            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+        {user.role === "company" && (
+          <div className="card-soft p-4 mb-6 bg-blue-50 border-blue-200 flex gap-3">
+            <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
             <div className="text-sm flex-1">
-              <div className="font-bold text-rose-900">Abonnement requis</div>
-              <div className="text-rose-800">Vous devez activer l'abonnement Pro Bons Plans (1€/mois ou 10€/an) pour publier.</div>
-              <Button onClick={() => navigate("/payments/subscribe")} className="mt-2 rounded-full bg-rose-600 hover:bg-rose-700" size="sm" data-testid="goto-subscribe">Voir les offres</Button>
+              <div className="font-bold text-blue-900">Validation administrateur</div>
+              <div className="text-blue-800">
+                Tous les bons plans (entreprises et étudiants) sont vérifiés avant publication.
+                {subActive === false && <> Pour publier <b>illimité</b>, activez l'abonnement Pro (1€/mois ou 10€/an).</>}
+                {subActive && <> ✓ Vous bénéficiez de l'abonnement Pro <b>(publications illimitées)</b>.</>}
+              </div>
             </div>
-          </div>
-        )}
-        {user.role === "company" && subActive && (
-          <div className="card-soft p-4 mb-6 bg-emerald-50 border-emerald-200 flex gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="text-sm text-emerald-800"><b>Abonnement actif</b> — votre bon plan sera publié immédiatement.</div>
           </div>
         )}
 

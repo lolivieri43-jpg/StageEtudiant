@@ -31,6 +31,10 @@ import BoostPage from "./pages/BoostPage";
 import PaymentSuccessPage from "./pages/PaymentSuccessPage";
 import PaymentCancelPage from "./pages/PaymentCancelPage";
 import AdminMonetizationPage from "./pages/AdminMonetizationPage";
+import AdminDealsPage from "./pages/AdminDealsPage";
+import AdminAdsPage from "./pages/AdminAdsPage";
+import NewAdPage from "./pages/NewAdPage";
+import MyAdsPage from "./pages/MyAdsPage";
 import SearchStudentsPage from "./pages/SearchStudentsPage";
 import ApplicationDetailPage from "./pages/ApplicationDetailPage";
 import SavedOffersPage from "./pages/SavedOffersPage";
@@ -79,6 +83,11 @@ function AppRouter() {
         <Route path="/payment/success" element={<PaymentSuccessPage />} />
         <Route path="/payment/cancel" element={<PaymentCancelPage />} />
         <Route path="/admin/monetization" element={<Protected><AdminMonetizationPage /></Protected>} />
+        <Route path="/admin/deals" element={<Protected><AdminDealsPage /></Protected>} />
+        <Route path="/admin/ads" element={<Protected><AdminAdsPage /></Protected>} />
+        <Route path="/ads/new" element={<Protected><NewAdPage /></Protected>} />
+        <Route path="/ads/mine" element={<Protected><MyAdsPage /></Protected>} />
+        <Route path="/ads/:id/edit" element={<Protected><NewAdPage /></Protected>} />
         <Route path="/search/students" element={<Protected><SearchStudentsPage /></Protected>} />
         <Route path="/applications/:id" element={<Protected><ApplicationDetailPage /></Protected>} />
         <Route path="/saved-offers" element={<Protected><SavedOffersPage /></Protected>} />
