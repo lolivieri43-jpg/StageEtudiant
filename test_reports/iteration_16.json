@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 16 — Refactor split of server.py: posts + messages routes moved to /app/backend/routes/posts.py and /app/backend/routes/messages.py via register_*_routes(api_router, db, get_current_user, notify) pattern. Pure refactor, strict behavior preservation. 29/29 new pytest cases pass + 36/36 prior regression tests (iter14/iter15) still green. No functional regression detected on posts, messages, ads rate-limit, admin/deals, admin/ads, external-offers/keyless, /upload (mp4/webm/mov/docx/xlsx/pptx/png), /auth/login, /messages-rt (still inline in server.py).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter16_routes_refactor.py",
+    "/app/test_reports/pytest/pytest_iter16.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DUPLICATION — Pydantic models PostIn/PostMedia/LinkPreview/CommentIn/MessageIn/MessageAttachment are now defined BOTH in /app/backend/server.py (used by inline /messages-rt) AND in /app/backend/routes/{posts,messages}.py. If a field is added to one copy the other will silently drift. Recommend: keep models in one place (either a /app/backend/models.py shared module imported by both server.py and routes/*) and remove the duplicates.",
+    "REFACTOR INCONSISTENCY — The new routers register on `ads_api` (the APIRouter created for ads, named after the ads domain). Naming is now misleading because /api/posts and /api/messages share the same router as /api/ads/*. Suggest renaming `ads_api` to `extra_api` or `feature_api`, or create one APIRouter per feature module and include each separately.",
+    "server.py is still ~4000 lines. Refactor is good start; continue extracting /api/auth, /api/users, /api/offers, /api/applications, /api/deals, /api/notifications into their own routes/*.py files using the same register_*_routes pattern to reach <700 lines per file (project guideline).",
+    "Tests under /app/backend/tests/ depend on REACT_APP_BACKEND_URL being present in the shell environment. The newer test files (iter15, iter14, iter16-new) silently fall back to None, leading to collection errors when run by plain `pytest backend/tests/`. Recommend a conftest.py at /app/backend/tests/conftest.py that loads /app/frontend/.env once via python-dotenv to make every suite portable.",
+    "routes/messages.py send_message — `last_message` ternary still uses ambiguous precedence (carryover from iter15 note). Same minor clarity issue."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter16_routes_refactor.py",
+    "/app/test_reports/iteration_16.json",
+    "/app/test_reports/pytest/pytest_iter16.xml"
+  ],
+  "success_rate": {"backend": "100% (29/29 new + 36/36 prior regression)", "frontend": "not tested (backend-only per request)"},
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234!, lucas.martin@email.fr/Demo1234! — all verified working.",
+  "seed_data_creation": "Created TEST_iter16 posts (simple, with media+link_preview, to_like, to_comment) under both candidate and company accounts, exchanged a few TEST_ messages between lucas.martin and hr@technova (one with PDF attachment), 1 TEST_iter16 RT message, exercised one /ads/{id}/view dedup pair. Link-preview cache for https://example.com warmed in link_preview_cache collection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Refactor iter16 fully validated. New routers wired in server.py L3733-3741 alongside ads_routes. All endpoints behave identically to pre-refactor: posts CRUD-like flow (create/list/like/comment/comments), link-preview with 7-day cache (link_preview_cache collection), messages send + conversations + read marker. Notification 'kind' field (NOT 'type') correctly stamped as 'like' / 'comment' / 'message'. /messages-rt remains inline in server.py and still works (WebSocket push side-effect not verified by pytest, just HTTP 200 + persisted doc). External-offers public endpoint is /api/external-offers/keyless (not /api/external-offers). Admin /api/admin/ads and /api/admin/deals return objects ({ads:[...], counts, stats} and {deals:[...], counts}) — be careful when asserting shape. Models duplication (PostIn etc.) between server.py and routes/* should be consolidated in a future iter.",
+  "rca of the issue": "N/A — no failing tests after final run. Initial 6 failures were all in the test script itself (notification field is 'kind' not 'type'; admin endpoints wrap data in {ads:[..]} / {deals:[..]}; external-offers public endpoint is /keyless variant). Test script corrected; no production code touched."
+}
