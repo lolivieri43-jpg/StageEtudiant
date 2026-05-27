@@ -158,6 +158,15 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Rate limiting auth + protection brute-force
 - Split server.py en routers par domaine
 
+## Iteration 16 (2026-02) — Refactor : split de server.py + modèles partagés
+- ✅ **Modèles Pydantic centralisés** dans `/app/backend/models.py` (PostIn, PostMedia, LinkPreview, CommentIn, MessageIn, MessageAttachment) — fini la duplication
+- ✅ **Posts** extraits vers `/app/backend/routes/posts.py` (156 lignes — create, list, like, comment, comments, link-preview avec cache)
+- ✅ **Messages** extraits vers `/app/backend/routes/messages.py` (86 lignes — send, conversations, get)
+- ✅ **Routers séparés par domaine** : `ads_router`, `posts_router`, `messages_router` (chacun avec son APIRouter et son include_router) au lieu d'un fourre-tout `ads_api`
+- ✅ **Pattern** : `register_*_routes(api_router, db, get_current_user, notify, **deps)` éprouvé et appliqué de manière homogène
+- 📊 **Résultat** : `server.py` passe de 4197 → 3967 lignes (-230). Aucune régression : 29/29 nouveaux tests pytest + 36/36 régressions précédentes (iter14/15) passent.
+
+
 ## Iteration 15 (2026-02) — Phase I + J + Étape 2 (drag-drop) + Rate-limit
 - ✅ **Phase I — Médias riches fil social** :
   - Upload élargi : `mp4`/`webm`/`mov` (vidéos jusqu'à 50 Mo), `pdf` (15 Mo), `docx`/`xlsx`/`pptx`, images 8 Mo

@@ -111,52 +111,11 @@ class ApplicationIn(BaseModel):
     online_cv_template: Optional[str] = "modern"
     uploaded_doc_ids: List[str] = []
 
-class PostMedia(BaseModel):
-    type: str  # image | video | pdf
-    url: str
-    file_id: Optional[str] = None
-    filename: Optional[str] = None
-    mime: Optional[str] = None
-    size: Optional[int] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    poster: Optional[str] = None  # video thumbnail
-
-
-class LinkPreview(BaseModel):
-    url: str
-    title: Optional[str] = None
-    description: Optional[str] = None
-    image: Optional[str] = None
-    domain: Optional[str] = None
-
-
-class PostIn(BaseModel):
-    content: str
-    image: Optional[str] = None  # backward compat
-    category: Optional[str] = "general"  # annonce, recherche, conseil, general
-    media: List[PostMedia] = []
-    link_preview: Optional[LinkPreview] = None
-
-
-class MessageAttachment(BaseModel):
-    type: str  # image | video | pdf | doc | file
-    url: str
-    file_id: Optional[str] = None
-    filename: Optional[str] = None
-    mime: Optional[str] = None
-    size: Optional[int] = None
-
-
-class CommentIn(BaseModel):
-    post_id: str
-    content: str
-
-class MessageIn(BaseModel):
-    to_user_id: str
-    content: str
-    attachment: Optional[str] = None  # backward compat (single url)
-    attachments: List[MessageAttachment] = []
+# ---- Shared Pydantic models imported from /app/backend/models.py to avoid duplication ----
+from models import (
+    PostIn, PostMedia, LinkPreview, CommentIn,
+    MessageIn, MessageAttachment,
+)
 
 class ContactRequestIn(BaseModel):
     to_user_id: str
@@ -3729,16 +3688,22 @@ async def admin_clear_ft_cache(user=Depends(get_current_user)):
 app.include_router(ft_api)
 
 
-# ============ ADS / Publicités sponsorisées (Phase H+) ============
+# ============ Feature routers (split from server.py for maintainability) ============
 from ads_routes import register_ads_routes
 from routes.posts import register_posts_routes
 from routes.messages import register_messages_routes
 
-ads_api = APIRouter(prefix="/api")
-register_ads_routes(ads_api, db, get_current_user, notify, company_subscription_active)
-register_posts_routes(ads_api, db, get_current_user, notify)
-register_messages_routes(ads_api, db, get_current_user, notify)
-app.include_router(ads_api)
+ads_router = APIRouter(prefix="/api")
+register_ads_routes(ads_router, db, get_current_user, notify, company_subscription_active)
+app.include_router(ads_router)
+
+posts_router = APIRouter(prefix="/api")
+register_posts_routes(posts_router, db, get_current_user, notify)
+app.include_router(posts_router)
+
+messages_router = APIRouter(prefix="/api")
+register_messages_routes(messages_router, db, get_current_user, notify)
+app.include_router(messages_router)
 
 
 # ============ ITERATION 12: External Sources Aggregator + Diploma Levels + Cleanup ============

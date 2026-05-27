@@ -11,23 +11,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel  # noqa: F401
 
-
-class MessageAttachment(BaseModel):
-    type: str  # image | video | pdf | doc | file
-    url: str
-    file_id: Optional[str] = None
-    filename: Optional[str] = None
-    mime: Optional[str] = None
-    size: Optional[int] = None
-
-
-class MessageIn(BaseModel):
-    to_user_id: str
-    content: str
-    attachment: Optional[str] = None
-    attachments: List[MessageAttachment] = []
+from models import MessageIn  # noqa: F401 — shared model
 
 
 def register_messages_routes(api_router, db, get_current_user, notify):

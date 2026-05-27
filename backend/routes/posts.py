@@ -19,38 +19,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel
 
-
-class PostMedia(BaseModel):
-    type: str
-    url: str
-    file_id: Optional[str] = None
-    filename: Optional[str] = None
-    mime: Optional[str] = None
-    size: Optional[int] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    poster: Optional[str] = None
-
-
-class LinkPreview(BaseModel):
-    url: str
-    title: Optional[str] = None
-    description: Optional[str] = None
-    image: Optional[str] = None
-    domain: Optional[str] = None
-
-
-class PostIn(BaseModel):
-    content: str
-    image: Optional[str] = None
-    category: Optional[str] = "general"
-    media: List[PostMedia] = []
-    link_preview: Optional[LinkPreview] = None
-
-
-class CommentIn(BaseModel):
-    post_id: str
-    content: str
+from models import PostIn, CommentIn  # noqa: F401 — shared models
 
 
 def register_posts_routes(api_router, db, get_current_user, notify):
