@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 17 — split of /api/contacts, /api/notifications, /api/deals into /app/backend/routes/*.py and NEW moderation feature (signalements posts/comments) validated end-to-end. Backend: 29/29 pytest pass (1 skipped: contacts already connected from previous run). Iter16 regression suite re-run green (29/29). Frontend: admin /admin/reports page renders the 4 tabs with correct counts matching backend, header admin menu contains 'Signalements', feed '...' menu exposes 'Signaler' on other-user posts, and the full Signaler flow (window.prompt × 2 → POST /api/reports → toast 'Signalement transmis à la modération') was executed successfully and verified via /api/reports/mine (rep_02987f4c1587, reason=harassment).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_moderation_routes.py",
+    "/app/test_reports/pytest/pytest_iter17.xml",
+    "/app/backend/tests/test_iter16_routes_refactor.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MODEL DUPLICATION (still applies from iter16) — Pydantic models PostIn/PostMedia/LinkPreview/CommentIn/MessageIn/MessageAttachment exist in BOTH server.py and routes/posts.py + routes/messages.py. New iter17 models ContactRequestIn and DealIn correctly live in /app/backend/models.py and are imported by both server.py (in case still referenced) and routes/*. Recommend moving the post/message models there too.",
+    "ROUTER NAMING — all 7 routers (ads/posts/messages/contacts/notifications/deals/moderation) still register on the same APIRouter instance (ads_api). Single shared router works but is misleading; consider one APIRouter per module included on the main app for cleaner mounting and easier prefix changes.",
+    "SERVER.PY SIZE — Down to ~3650 lines (good progress, -547 cumulative since iter15). Remaining big inline blocks: /api/auth/*, /api/users/*, /api/offers/*, /api/applications/*, /api/cv/*, /api/messages-rt/* WebSocket. Continue extracting to hit the <700 lines/file guideline.",
+    "REASON i18n LEAK — REASONS list is in English ('spam','harassment',...) but the user prompt and the admin row badges display in French; mapping is implicit. Consider storing a (slug, fr_label, en_label) triple or a constant map for clearer maintenance.",
+    "MODERATION endpoint POST /admin/reports/{id}/dismiss & /remove accept body: dict (no Pydantic validation). Switch to small DismissIn / RemoveIn models for shape safety.",
+    "POST /api/posts/comment uses body.post_id rather than the more REST-y /api/posts/{post_id}/comments — the GET side uses the path form, leading to asymmetry that already tripped a regression test. Consider keeping both for back-compat then deprecating /posts/comment."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17_moderation_routes.py",
+    "/app/test_reports/iteration_17.json",
+    "/app/test_reports/pytest/pytest_iter17.xml"
+  ],
+  "success_rate": {
+    "backend": "100% (29/29 iter17 + 29/29 iter16 regression)",
+    "frontend": "100% on tested flows (admin reports page, header menu, feed Signaler menu, full report submission e2e)"
+  },
+  "test_credentials": "admin@stagiaireconnect.fr/Admin123!, hr@technova.fr/Demo1234!, lucas.martin@email.fr/Demo1234!, emma.dubois@email.fr/Demo1234! — all working.",
+  "seed_data_creation": "TEST_iter17 prefix used everywhere. Created: TEST_iter17 bon plan (deal_*) by hr@technova → admin approved → re-pended on edit → re-approved → saved by lucas (notifies HR); TEST_iter17 post by lucas reported by HR (spam) then dismissed (kept); TEST_iter17 comment by lucas reported by HR (harassment) then admin-removed (cascade delete + moderation_removed notification to lucas verified); TEST_iter17 archive post reported and report deleted; TEST_iter17 regression post liked + commented. Frontend run also created rep_02987f4c1587 (emma reports a techNova post for harassment).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter17 fully green. /api/posts/comment is POST with body {post_id, content} (NOT /posts/{id}/comments — that's only GET). Moderation REASONS slugs: spam/harassment/hate_speech/violence/inappropriate/misinformation/scam/other. Admin endpoints return {reports|deals:[...], counts:{pending,kept,removed,all}} — assert on .reports / .deals not the root. Report uniqueness is per (reporter_id, target_type, target_id) tuple; dismiss/remove operate per-target (cascade to all reports about the same target). Frontend Signaler uses window.prompt twice — handle with page.on('dialog', ...) in playwright. Admin Reports UI testids: report-tab-{status}, report-row-{rid}, dismiss-{rid}, remove-{rid}, refresh-reports. Feed UI testids: post-menu-{pid}, report-post-{pid}. /admin/reports route confirmed wired in App.js and Header admin dropdown contains the 'Signalements' link. Remaining non-blocking cleanup: model dedup, server.py extraction continuation.",
+  "rca of the issue": "N/A — all tests green. Two scripted false-positives during dev (comment endpoint path mismatch, first dialog-handler attempt re-opening an already-closed dropdown) were fixed in the test script only; no production code modified."
+}

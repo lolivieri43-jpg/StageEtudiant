@@ -60,3 +60,22 @@ class MessageIn(BaseModel):
     content: str
     attachment: Optional[str] = None
     attachments: List[MessageAttachment] = []
+
+
+# ---------- CONTACTS ----------
+class ContactRequestIn(BaseModel):
+    to_user_id: str
+
+
+# ---------- DEALS ----------
+class DealIn(BaseModel):
+    title: str
+    description: str
+    category: Optional[str] = "general"  # food, sport, culture, transport, study, fashion, tech
+    city: Optional[str] = None
+    region: Optional[str] = None
+    image: Optional[str] = None
+    promo_code: Optional[str] = None
+    discount: Optional[str] = None  # "-20%", "Gratuit", "10€ offerts"
+    url: Optional[str] = None
+    expires_at: Optional[str] = None  # ISO date

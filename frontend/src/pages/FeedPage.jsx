@@ -2,10 +2,11 @@ import React, { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { Heart, MessageCircle, Share2, Send, Image as ImageIcon, Video, FileText, Link as LinkIcon, X, Loader2, Paperclip } from "lucide-react";
+import { Heart, MessageCircle, Share2, Send, Image as ImageIcon, Video, FileText, Link as LinkIcon, X, Loader2, Paperclip, Flag, MoreHorizontal } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
 import { fr } from "date-fns/locale";
 import { toast } from "sonner";
@@ -220,6 +221,7 @@ const PostCard = ({ post, user, onLike }) => {
   const [comments, setComments] = useState([]);
   const [comment, setComment] = useState("");
   const liked = user && post.likes?.includes(user.user_id);
+  const isMine = user && post.author_id === user.user_id;
 
   const loadComments = async () => {
     const { data } = await api.get(`/posts/${post.post_id}/comments`);
@@ -231,6 +233,54 @@ const PostCard = ({ post, user, onLike }) => {
     await api.post("/posts/comment", { post_id: post.post_id, content: comment });
     setComment("");
     loadComments();
+  };
+
+  const reportPost = async () => {
+    const reasons = [
+      ["spam", "Spam / publicité"],
+      ["harassment", "Harcèlement"],
+      ["hate_speech", "Discours haineux"],
+      ["violence", "Violence"],
+      ["inappropriate", "Contenu inapproprié"],
+      ["misinformation", "Désinformation"],
+      ["scam", "Arnaque"],
+      ["other", "Autre"],
+    ];
+    const msg = "Pourquoi signalez-vous cette publication ?\n" +
+      reasons.map((r, i) => `${i + 1}. ${r[1]}`).join("\n") +
+      "\n\nEntrez le numéro (1-8) :";
+    const choice = window.prompt(msg, "1");
+    if (!choice) return;
+    const idx = parseInt(choice, 10) - 1;
+    if (idx < 0 || idx >= reasons.length) {
+      toast.error("Choix invalide");
+      return;
+    }
+    const details = window.prompt("Précisions (facultatif) :", "") || "";
+    try {
+      await api.post("/reports", {
+        target_type: "post",
+        target_id: post.post_id,
+        reason: reasons[idx][0],
+        details,
+      });
+      toast.success("Signalement transmis à la modération");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur");
+    }
+  };
+
+  const reportComment = async (commentId) => {
+    const reason = window.prompt("Raison (spam, harassment, hate_speech, violence, inappropriate, misinformation, scam, other) :", "spam");
+    if (!reason) return;
+    try {
+      await api.post("/reports", {
+        target_type: "comment", target_id: commentId, reason,
+      });
+      toast.success("Commentaire signalé");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erreur");
+    }
   };
 
   const cats = {
@@ -257,6 +307,20 @@ const PostCard = ({ post, user, onLike }) => {
             {cat && <Badge className={`${cat.color} border-0 rounded-full text-[10px]`}>{cat.label}</Badge>}
           </div>
         </div>
+        {user && !isMine && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400" data-testid={`post-menu-${post.post_id}`}>
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={reportPost} className="text-rose-600" data-testid={`report-post-${post.post_id}`}>
+                <Flag className="w-4 h-4 mr-2" />Signaler
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       <p className="text-slate-700 leading-relaxed mb-4 whitespace-pre-wrap">{post.content}</p>
 
@@ -294,12 +358,17 @@ const PostCard = ({ post, user, onLike }) => {
       {showComments && (
         <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
           {comments.map(c => (
-            <div key={c.comment_id} className="flex gap-2 text-sm">
+            <div key={c.comment_id} className="flex gap-2 text-sm group">
               <div className="w-8 h-8 rounded-full bg-slate-200 grid place-items-center text-xs font-bold shrink-0">{c.author_name[0]}</div>
               <div className="flex-1 bg-slate-50 rounded-2xl px-3 py-2">
                 <div className="font-semibold">{c.author_name}</div>
                 <div className="text-slate-600">{c.content}</div>
               </div>
+              {user && c.author_id !== user.user_id && (
+                <button onClick={() => reportComment(c.comment_id)} className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-1" data-testid={`report-comment-${c.comment_id}`} title="Signaler ce commentaire">
+                  <Flag className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           ))}
           {user && (

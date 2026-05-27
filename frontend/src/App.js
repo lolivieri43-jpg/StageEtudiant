@@ -33,6 +33,7 @@ import PaymentCancelPage from "./pages/PaymentCancelPage";
 import AdminMonetizationPage from "./pages/AdminMonetizationPage";
 import AdminDealsPage from "./pages/AdminDealsPage";
 import AdminAdsPage from "./pages/AdminAdsPage";
+import AdminReportsPage from "./pages/AdminReportsPage";
 import NewAdPage from "./pages/NewAdPage";
 import MyAdsPage from "./pages/MyAdsPage";
 import SearchStudentsPage from "./pages/SearchStudentsPage";
@@ -85,6 +86,7 @@ function AppRouter() {
         <Route path="/admin/monetization" element={<Protected><AdminMonetizationPage /></Protected>} />
         <Route path="/admin/deals" element={<Protected><AdminDealsPage /></Protected>} />
         <Route path="/admin/ads" element={<Protected><AdminAdsPage /></Protected>} />
+        <Route path="/admin/reports" element={<Protected><AdminReportsPage /></Protected>} />
         <Route path="/ads/new" element={<Protected><NewAdPage /></Protected>} />
         <Route path="/ads/mine" element={<Protected><MyAdsPage /></Protected>} />
         <Route path="/ads/:id/edit" element={<Protected><NewAdPage /></Protected>} />

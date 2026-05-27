@@ -114,11 +114,8 @@ class ApplicationIn(BaseModel):
 # ---- Shared Pydantic models imported from /app/backend/models.py to avoid duplication ----
 from models import (
     PostIn, PostMedia, LinkPreview, CommentIn,
-    MessageIn, MessageAttachment,
+    MessageIn, MessageAttachment, ContactRequestIn, DealIn,
 )
-
-class ContactRequestIn(BaseModel):
-    to_user_id: str
 
 # ============ HELPERS ============
 def hash_password(pw: str) -> str:
@@ -501,78 +498,8 @@ async def update_application(app_id: str, data: dict, user=Depends(get_current_u
 # ============ POSTS / FEED — moved to routes/posts.py ============
 # ============ MESSAGES — moved to routes/messages.py ============
 
-# ============ CONTACTS ============
-@api.post("/contacts/request")
-async def request_contact(data: ContactRequestIn, user=Depends(get_current_user)):
-    if data.to_user_id == user["user_id"]:
-        raise HTTPException(400, "Impossible")
-    existing = await db.contact_requests.find_one({"from_id": user["user_id"], "to_id": data.to_user_id, "status": "pending"})
-    if existing:
-        raise HTTPException(400, "Demande déjà envoyée")
-    other = await db.users.find_one({"user_id": data.to_user_id}, {"_id": 0})
-    if not other:
-        raise HTTPException(404, "Introuvable")
-    rid = f"cr_{uuid.uuid4().hex[:10]}"
-    await db.contact_requests.insert_one({
-        "request_id": rid,
-        "from_id": user["user_id"],
-        "from_name": user["name"],
-        "from_avatar": user.get("profile", {}).get("avatar") or user.get("profile", {}).get("logo"),
-        "to_id": data.to_user_id,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    await notify(data.to_user_id, "contact_request", f"{user['name']} souhaite ajouter en contact", "/contacts", {"user_id": user["user_id"], "name": user["name"]})
-    return {"ok": True, "request_id": rid}
-
-@api.post("/contacts/{request_id}/accept")
-async def accept_contact(request_id: str, user=Depends(get_current_user)):
-    req = await db.contact_requests.find_one({"request_id": request_id})
-    if not req or req["to_id"] != user["user_id"]:
-        raise HTTPException(404, "Introuvable")
-    await db.contact_requests.update_one({"request_id": request_id}, {"$set": {"status": "accepted"}})
-    pair = sorted([req["from_id"], req["to_id"]])
-    await db.contacts.insert_one({
-        "contact_id": f"ct_{uuid.uuid4().hex[:10]}",
-        "user_a": pair[0],
-        "user_b": pair[1],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    await notify(req["from_id"], "contact_accepted", f"{user['name']} a accepté votre demande de contact", "/contacts")
-    return {"ok": True}
-
-@api.post("/contacts/{request_id}/refuse")
-async def refuse_contact(request_id: str, user=Depends(get_current_user)):
-    req = await db.contact_requests.find_one({"request_id": request_id})
-    if not req or req["to_id"] != user["user_id"]:
-        raise HTTPException(404, "Introuvable")
-    await db.contact_requests.update_one({"request_id": request_id}, {"$set": {"status": "refused"}})
-    return {"ok": True}
-
-@api.get("/contacts")
-async def list_contacts(user=Depends(get_current_user)):
-    cs = await db.contacts.find({"$or": [{"user_a": user["user_id"]}, {"user_b": user["user_id"]}]}, {"_id": 0}).to_list(200)
-    pending = await db.contact_requests.find({"to_id": user["user_id"], "status": "pending"}, {"_id": 0}).to_list(50)
-    sent = await db.contact_requests.find({"from_id": user["user_id"], "status": "pending"}, {"_id": 0}).to_list(50)
-    contacts = []
-    for c in cs:
-        other_id = c["user_b"] if c["user_a"] == user["user_id"] else c["user_a"]
-        other = await db.users.find_one({"user_id": other_id}, {"_id": 0, "password": 0})
-        if other:
-            contacts.append(other)
-    return {"contacts": contacts, "pending": pending, "sent": sent}
-
-# ============ NOTIFICATIONS ============
-@api.get("/notifications")
-async def list_notifs(user=Depends(get_current_user)):
-    n = await db.notifications.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
-    unread = sum(1 for x in n if not x.get("read"))
-    return {"notifications": n, "unread": unread}
-
-@api.post("/notifications/read")
-async def mark_read(user=Depends(get_current_user)):
-    await db.notifications.update_many({"user_id": user["user_id"]}, {"$set": {"read": True}})
-    return {"ok": True}
+# ============ CONTACTS — moved to routes/contacts.py ============
+# ============ NOTIFICATIONS — moved to routes/notifications.py ============
 
 # ============ STATS / DASHBOARD ============
 @api.get("/dashboard")
@@ -830,18 +757,6 @@ PACKAGES = {
 
 DealStatus = Literal["draft", "pending", "published", "refused", "suspended", "expired"]
 
-class DealIn(BaseModel):
-    title: str
-    description: str
-    category: Optional[str] = "general"  # food, sport, culture, transport, study, fashion, tech
-    city: Optional[str] = None
-    region: Optional[str] = None
-    image: Optional[str] = None
-    promo_code: Optional[str] = None
-    discount: Optional[str] = None  # "-20%", "Gratuit", "10€ offerts"
-    url: Optional[str] = None
-    expires_at: Optional[str] = None  # ISO date
-
 class CheckoutIn(BaseModel):
     package_id: str
     origin_url: str
@@ -861,209 +776,7 @@ async def company_subscription_active(company_id: str) -> bool:
         return False
     return True
 
-@api.post("/deals")
-async def create_deal(data: DealIn, user=Depends(get_current_user)):
-    # All deals (company AND student) must be validated by admin before going public
-    status = "pending"
-    if user["role"] == "company" and not await company_subscription_active(user["user_id"]):
-        # Free companies can still propose, just like students, status pending
-        pass
-    deal_id = f"deal_{uuid.uuid4().hex[:12]}"
-    doc = {
-        "deal_id": deal_id,
-        "author_id": user["user_id"],
-        "author_name": user["name"],
-        "author_type": user["role"],
-        "author_avatar": user.get("profile", {}).get("avatar") or user.get("profile", {}).get("logo"),
-        **data.model_dump(),
-        "status": status,
-        "boosted_until": None,
-        "sponsored_until": None,
-        "views": 0,
-        "clicks": 0,
-        "saves": [],
-        "shares": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.deals.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
-
-@api.get("/deals")
-async def list_deals(
-    q: Optional[str] = None,
-    category: Optional[str] = None,
-    region: Optional[str] = None,
-    city: Optional[str] = None,
-    author_type: Optional[str] = None,
-    status: Optional[str] = "published",
-    limit: int = 60,
-):
-    query = {}
-    if status:
-        query["status"] = status
-    if q:
-        query["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}},
-        ]
-    if category: query["category"] = category
-    if region: query["region"] = region
-    if city: query["city"] = {"$regex": city, "$options": "i"}
-    if author_type: query["author_type"] = author_type
-    deals = await db.deals.find(query, {"_id": 0}).to_list(limit)
-    now = datetime.now(timezone.utc)
-    def tier(d):
-        s = d.get("sponsored_until")
-        b = d.get("boosted_until")
-        if s and datetime.fromisoformat(s).replace(tzinfo=timezone.utc) > now: return 0
-        if b and datetime.fromisoformat(b).replace(tzinfo=timezone.utc) > now: return 1
-        return 2
-    deals.sort(key=lambda d: (tier(d), d.get("created_at", ""), ), reverse=False)
-    # Then reverse-sort by date within same tier
-    deals.sort(key=lambda d: (tier(d), -datetime.fromisoformat(d["created_at"]).timestamp()))
-    return deals
-
-@api.get("/deals/mine")
-async def my_deals(user=Depends(get_current_user)):
-    deals = await db.deals.find({"author_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    saved_ids = []
-    for d in await db.deals.find({"saves": user["user_id"]}, {"_id": 0, "deal_id": 1}).to_list(200):
-        saved_ids.append(d["deal_id"])
-    saved = await db.deals.find({"deal_id": {"$in": saved_ids}}, {"_id": 0}).to_list(200)
-    boosts = await db.boost_orders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    return {"deals": deals, "saved": saved, "boosts": boosts}
-
-@api.get("/deals/{deal_id}")
-async def get_deal(deal_id: str):
-    d = await db.deals.find_one({"deal_id": deal_id}, {"_id": 0})
-    if not d:
-        raise HTTPException(404, "Bon plan introuvable")
-    await db.deals.update_one({"deal_id": deal_id}, {"$inc": {"views": 1}})
-    d["views"] = d.get("views", 0) + 1
-    return d
-
-@api.patch("/deals/{deal_id}")
-async def update_deal(deal_id: str, data: dict, user=Depends(get_current_user)):
-    d = await db.deals.find_one({"deal_id": deal_id})
-    if not d:
-        raise HTTPException(404, "Introuvable")
-    is_admin = user["role"] == "admin"
-    if d["author_id"] != user["user_id"] and not is_admin:
-        raise HTTPException(403, "Interdit")
-    allowed = {"title", "description", "category", "city", "region", "image", "promo_code", "discount", "url", "expires_at"}
-    upd = {k: v for k, v in data.items() if k in allowed}
-    # Author edits a validated/suspended deal => must be re-validated
-    if upd and not is_admin and d.get("status") in ("published", "suspended", "refused"):
-        upd["status"] = "pending"
-    if upd:
-        await db.deals.update_one({"deal_id": deal_id}, {"$set": upd})
-    return {"ok": True, "status": upd.get("status", d.get("status"))}
-
-@api.delete("/deals/{deal_id}")
-async def delete_deal(deal_id: str, user=Depends(get_current_user)):
-    d = await db.deals.find_one({"deal_id": deal_id})
-    if not d:
-        raise HTTPException(404, "Introuvable")
-    if d["author_id"] != user["user_id"] and user["role"] != "admin":
-        raise HTTPException(403, "Interdit")
-    await db.deals.delete_one({"deal_id": deal_id})
-    return {"ok": True}
-
-@api.post("/deals/{deal_id}/save")
-async def save_deal(deal_id: str, user=Depends(get_current_user)):
-    d = await db.deals.find_one({"deal_id": deal_id})
-    if not d:
-        raise HTTPException(404, "Introuvable")
-    saves = d.get("saves", [])
-    if user["user_id"] in saves:
-        saves.remove(user["user_id"])
-    else:
-        saves.append(user["user_id"])
-        if d["author_id"] != user["user_id"]:
-            await notify(d["author_id"], "deal_save", f"{user['name']} a sauvegardé votre bon plan \"{d['title']}\"", f"/deals/{deal_id}")
-    await db.deals.update_one({"deal_id": deal_id}, {"$set": {"saves": saves}})
-    return {"saves": saves}
-
-@api.post("/deals/{deal_id}/click")
-async def click_deal(deal_id: str):
-    await db.deals.update_one({"deal_id": deal_id}, {"$inc": {"clicks": 1}})
-    return {"ok": True}
-
-@api.post("/deals/{deal_id}/share")
-async def share_deal(deal_id: str):
-    await db.deals.update_one({"deal_id": deal_id}, {"$inc": {"shares": 1}})
-    return {"ok": True}
-
-# Admin: validation
-@api.post("/admin/deals/{deal_id}/validate")
-async def validate_deal(deal_id: str, body: dict, user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin")
-    action = body.get("action")  # approve | refuse | suspend | reactivate | expire
-    deal = await db.deals.find_one({"deal_id": deal_id})
-    if not deal:
-        raise HTTPException(404, "Introuvable")
-    new_status = {
-        "approve": "published",
-        "validate": "published",
-        "refuse": "refused",
-        "suspend": "suspended",
-        "reactivate": "published",
-        "disable": "expired",
-        "expire": "expired",
-    }.get(action)
-    if not new_status:
-        raise HTTPException(400, "Action invalide")
-    set_doc = {"status": new_status,
-               "moderated_by": user["user_id"],
-               "moderated_at": datetime.now(timezone.utc).isoformat()}
-    reason = (body.get("reason") or "").strip()
-    if reason:
-        set_doc["moderation_reason"] = reason
-    await db.deals.update_one({"deal_id": deal_id}, {"$set": set_doc})
-    msg_map = {
-        "published": f"Votre bon plan \"{deal['title']}\" a été validé ✓",
-        "refused": f"Votre bon plan \"{deal['title']}\" a été refusé" + (f" — {reason}" if reason else ""),
-        "suspended": f"Votre bon plan \"{deal['title']}\" a été suspendu" + (f" — {reason}" if reason else ""),
-        "expired": f"Votre bon plan \"{deal['title']}\" a expiré",
-    }
-    await notify(deal["author_id"], "deal_validation",
-                 msg_map.get(new_status, f"Statut: {new_status}"),
-                 f"/deals/{deal_id}")
-    return {"ok": True, "status": new_status}
-
-
-@api.get("/admin/deals")
-async def admin_list_deals(status: Optional[str] = None,
-                           q: Optional[str] = None,
-                           limit: int = 200,
-                           user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin")
-    query: dict = {}
-    if status and status != "all":
-        query["status"] = status
-    if q:
-        query["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}},
-            {"author_name": {"$regex": q, "$options": "i"}},
-        ]
-    deals = await db.deals.find(query, {"_id": 0}).sort("created_at", -1).to_list(min(limit, 500))
-    # Status counters for tabs
-    counts: dict = {}
-    for s in ("draft", "pending", "published", "refused", "suspended", "expired"):
-        counts[s] = await db.deals.count_documents({"status": s})
-    counts["all"] = await db.deals.count_documents({})
-    return {"deals": deals, "counts": counts}
-
-
-@api.get("/admin/deals/pending")
-async def admin_pending_deals(user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin")
-    return await db.deals.find({"status": "pending"}, {"_id": 0}).sort("created_at", -1).to_list(100)
+# ============ DEALS — moved to routes/deals.py ============
 
 # Subscription status
 @api.get("/subscriptions/me")
@@ -1614,57 +1327,7 @@ async def search_students(
     users = await db.users.find(query, {"_id": 0, "password": 0}).limit(limit).to_list(limit)
     return users
 
-# ============ CONTACT EXTENSIONS: cancel sent, block ============
-@api.delete("/contacts/request/{request_id}")
-async def cancel_contact_request(request_id: str, user=Depends(get_current_user)):
-    r = await db.contact_requests.find_one({"request_id": request_id})
-    if not r or r["from_id"] != user["user_id"]:
-        raise HTTPException(403, "Interdit")
-    await db.contact_requests.delete_one({"request_id": request_id})
-    return {"ok": True}
-
-@api.delete("/contacts/{contact_user_id}")
-async def remove_contact(contact_user_id: str, user=Depends(get_current_user)):
-    await db.contacts.delete_many({"$or": [
-        {"user_a": user["user_id"], "user_b": contact_user_id},
-        {"user_a": contact_user_id, "user_b": user["user_id"]},
-    ]})
-    return {"ok": True}
-
-@api.post("/contacts/block/{target_id}")
-async def block_user(target_id: str, user=Depends(get_current_user)):
-    existing = await db.blocked_users.find_one({"blocker_id": user["user_id"], "blocked_id": target_id})
-    if existing:
-        return {"ok": True, "already_blocked": True}
-    await db.blocked_users.insert_one({
-        "block_id": f"b_{uuid.uuid4().hex[:10]}",
-        "blocker_id": user["user_id"], "blocked_id": target_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    await db.contacts.delete_many({"$or": [
-        {"user_a": user["user_id"], "user_b": target_id},
-        {"user_a": target_id, "user_b": user["user_id"]},
-    ]})
-    return {"ok": True}
-
-# Contact status helper for frontend
-@api.get("/contacts/status/{other_id}")
-async def contact_status(other_id: str, user=Depends(get_current_user)):
-    if other_id == user["user_id"]:
-        return {"status": "self"}
-    c = await db.contacts.find_one({"$or": [
-        {"user_a": user["user_id"], "user_b": other_id},
-        {"user_a": other_id, "user_b": user["user_id"]},
-    ]})
-    if c:
-        return {"status": "connected"}
-    sent = await db.contact_requests.find_one({"from_id": user["user_id"], "to_id": other_id, "status": "pending"}, {"_id": 0})
-    if sent:
-        return {"status": "sent", "request_id": sent["request_id"]}
-    received = await db.contact_requests.find_one({"from_id": other_id, "to_id": user["user_id"], "status": "pending"}, {"_id": 0})
-    if received:
-        return {"status": "received", "request_id": received["request_id"]}
-    return {"status": "none"}
+# ============ CONTACT EXTENSIONS — moved to routes/contacts.py ============
 
 # ============ MASSIVE SEED v3 ============
 @api.post("/seed-v3")
@@ -3692,6 +3355,10 @@ app.include_router(ft_api)
 from ads_routes import register_ads_routes
 from routes.posts import register_posts_routes
 from routes.messages import register_messages_routes
+from routes.contacts import register_contacts_routes
+from routes.notifications import register_notifications_routes
+from routes.deals import register_deals_routes
+from routes.moderation import register_moderation_routes
 
 ads_router = APIRouter(prefix="/api")
 register_ads_routes(ads_router, db, get_current_user, notify, company_subscription_active)
@@ -3704,6 +3371,22 @@ app.include_router(posts_router)
 messages_router = APIRouter(prefix="/api")
 register_messages_routes(messages_router, db, get_current_user, notify)
 app.include_router(messages_router)
+
+contacts_router = APIRouter(prefix="/api")
+register_contacts_routes(contacts_router, db, get_current_user, notify)
+app.include_router(contacts_router)
+
+notifications_router = APIRouter(prefix="/api")
+register_notifications_routes(notifications_router, db, get_current_user)
+app.include_router(notifications_router)
+
+deals_router = APIRouter(prefix="/api")
+register_deals_routes(deals_router, db, get_current_user, notify)
+app.include_router(deals_router)
+
+moderation_router = APIRouter(prefix="/api")
+register_moderation_routes(moderation_router, db, get_current_user, notify)
+app.include_router(moderation_router)
 
 
 # ============ ITERATION 12: External Sources Aggregator + Diploma Levels + Cleanup ============

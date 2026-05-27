@@ -126,6 +126,7 @@ export default function Header() {
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/monetization")} data-testid="menu-monetization">Monétisation</DropdownMenuItem>}
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/deals")} data-testid="menu-admin-deals">Modération bons plans</DropdownMenuItem>}
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/ads")} data-testid="menu-admin-ads">Modération publicités</DropdownMenuItem>}
+                {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/reports")} data-testid="menu-admin-reports">Signalements</DropdownMenuItem>}
                 {user.role === "company" && <DropdownMenuItem onClick={() => navigate("/ads/mine")} data-testid="menu-my-ads">Mes publicités</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} data-testid="menu-logout" className="text-red-600"><LogOut className="w-4 h-4 mr-2" />Déconnexion</DropdownMenuItem>
