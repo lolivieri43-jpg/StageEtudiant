@@ -104,17 +104,11 @@ class OfferIn(BaseModel):
     benefits: Optional[str] = None
     salary: Optional[str] = None
 
-class ApplicationIn(BaseModel):
-    offer_id: str
-    cover_letter: Optional[str] = None
-    use_online_cv: bool = True
-    online_cv_template: Optional[str] = "modern"
-    uploaded_doc_ids: List[str] = []
-
 # ---- Shared Pydantic models imported from /app/backend/models.py to avoid duplication ----
 from models import (
     PostIn, PostMedia, LinkPreview, CommentIn,
     MessageIn, MessageAttachment, ContactRequestIn, DealIn,
+    ApplicationIn,
 )
 
 # ============ HELPERS ============
@@ -418,82 +412,7 @@ async def delete_offer(offer_id: str, user=Depends(get_current_user)):
     await db.offers.delete_one({"offer_id": offer_id})
     return {"ok": True}
 
-# ============ APPLICATIONS ============
-@api.post("/applications")
-async def apply(data: ApplicationIn, user=Depends(get_current_user)):
-    if user["role"] != "candidate":
-        raise HTTPException(403, "Réservé aux candidats")
-    offer = await db.offers.find_one({"offer_id": data.offer_id}, {"_id": 0})
-    if not offer:
-        raise HTTPException(404, "Offre introuvable")
-    existing = await db.applications.find_one({"offer_id": data.offer_id, "candidate_id": user["user_id"]})
-    if existing:
-        raise HTTPException(400, "Vous avez déjà postulé")
-    app_id = f"app_{uuid.uuid4().hex[:12]}"
-    # Snapshot of online CV (if requested) so company always sees the CV as it was at apply time
-    online_cv_snapshot = None
-    if data.use_online_cv:
-        cv_doc = await db.student_cvs.find_one({"user_id": user["user_id"]}, {"_id": 0})
-        if cv_doc:
-            online_cv_snapshot = cv_doc
-    # Resolve user's selected uploaded documents
-    selected_docs = []
-    if data.uploaded_doc_ids:
-        docs = await db.student_documents.find(
-            {"user_id": user["user_id"], "doc_id": {"$in": data.uploaded_doc_ids}}, {"_id": 0}
-        ).to_list(20)
-        for d in docs:
-            selected_docs.append({
-                "doc_id": d.get("doc_id"),
-                "file_id": d.get("file_id"),
-                "filename": d.get("filename"),
-                "doc_type": d.get("doc_type", "autre"),
-            })
-    doc = {
-        "app_id": app_id,
-        "offer_id": data.offer_id,
-        "offer_title": offer["title"],
-        "company_id": offer["company_id"],
-        "company_name": offer.get("company_name"),
-        "candidate_id": user["user_id"],
-        "candidate_name": user["name"],
-        "candidate_avatar": user.get("profile", {}).get("avatar"),
-        "cover_letter": data.cover_letter,
-        "cv_url": user.get("profile", {}).get("cv_url"),
-        "use_online_cv": bool(data.use_online_cv and online_cv_snapshot),
-        "online_cv_snapshot": online_cv_snapshot,
-        "online_cv_template": data.online_cv_template or "modern",
-        "selected_documents": selected_docs,
-        "status": "envoyee",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.applications.insert_one(doc)
-    await notify(offer["company_id"], "application", f"{user['name']} a postulé à \"{offer['title']}\"", f"/applications", {"user_id": user["user_id"], "name": user["name"]})
-    doc.pop("_id", None)
-    return doc
-
-@api.get("/applications")
-async def my_applications(user=Depends(get_current_user)):
-    if user["role"] == "candidate":
-        apps = await db.applications.find({"candidate_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    elif user["role"] == "company":
-        apps = await db.applications.find({"company_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    else:
-        apps = await db.applications.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return apps
-
-@api.patch("/applications/{app_id}")
-async def update_application(app_id: str, data: dict, user=Depends(get_current_user)):
-    app_doc = await db.applications.find_one({"app_id": app_id}, {"_id": 0})
-    if not app_doc:
-        raise HTTPException(404, "Introuvable")
-    if app_doc["company_id"] != user["user_id"] and user["role"] != "admin":
-        raise HTTPException(403, "Interdit")
-    status = data.get("status")
-    if status in ("vue", "en_attente", "acceptee", "refusee"):
-        await db.applications.update_one({"app_id": app_id}, {"$set": {"status": status}})
-        await notify(app_doc["candidate_id"], "application_status", f"Votre candidature \"{app_doc['offer_title']}\" est maintenant: {status}", "/dashboard")
-    return {"ok": True}
+# ============ APPLICATIONS — moved to routes/applications.py ============
 
 # ============ POSTS / FEED — moved to routes/posts.py ============
 # ============ MESSAGES — moved to routes/messages.py ============
@@ -3359,6 +3278,7 @@ from routes.contacts import register_contacts_routes
 from routes.notifications import register_notifications_routes
 from routes.deals import register_deals_routes
 from routes.moderation import register_moderation_routes
+from routes.applications import register_applications_routes
 
 ads_router = APIRouter(prefix="/api")
 register_ads_routes(ads_router, db, get_current_user, notify, company_subscription_active)
@@ -3387,6 +3307,10 @@ app.include_router(deals_router)
 moderation_router = APIRouter(prefix="/api")
 register_moderation_routes(moderation_router, db, get_current_user, notify)
 app.include_router(moderation_router)
+
+applications_router = APIRouter(prefix="/api")
+register_applications_routes(applications_router, db, get_current_user, notify)
+app.include_router(applications_router)
 
 
 # ============ ITERATION 12: External Sources Aggregator + Diploma Levels + Cleanup ============

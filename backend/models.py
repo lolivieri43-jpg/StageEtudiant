@@ -45,6 +45,15 @@ class CommentIn(BaseModel):
     content: str
 
 
+# ---------- APPLICATIONS ----------
+class ApplicationIn(BaseModel):
+    offer_id: str
+    cover_letter: Optional[str] = None
+    use_online_cv: bool = True
+    online_cv_template: Optional[str] = "modern"
+    uploaded_doc_ids: List[str] = []
+
+
 # ---------- MESSAGES ----------
 class MessageAttachment(BaseModel):
     type: str  # image | video | pdf | doc | file

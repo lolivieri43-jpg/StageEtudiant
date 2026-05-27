@@ -158,7 +158,20 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Rate limiting auth + protection brute-force
 - Split server.py en routers par domaine
 
+## Iteration 17 (2026-02) — Split de server.py (suite) + Modération du fil social
+- ✅ **5 nouveaux splits** : `routes/contacts.py` (159), `routes/notifications.py` (21), `routes/deals.py` (227), `routes/moderation.py` (178), `routes/applications.py` (106)
+- ✅ **Modèles centralisés** : `ContactRequestIn`, `DealIn`, `ApplicationIn` ajoutés à `/app/backend/models.py`
+- ✅ **8 routers actifs** : ads + posts + messages + contacts + notifications + deals + moderation + applications = 1231 lignes externalisées
+- ✅ **Signalements posts/comments (P2)** : `POST /api/reports` (8 raisons, anti-doublon, refuse self-report), `GET /api/reports/mine`
+- ✅ **Queue admin** : `GET /api/admin/reports` (snapshot+compteurs), `POST /admin/reports/{id}/dismiss|remove`, notif auteur si supprimé
+- ✅ **Frontend** : menu "..." Signaler sur PostCard, Flag hover sur commentaires, page `/admin/reports` (4 onglets) + menu Header admin
+- 📊 **Résultat** : server.py 3967 → **3574 lignes (-393)**. Tests : 22/22 nouveaux + 35/35 régression.
+
 ## Iteration 16 (2026-02) — Refactor : split de server.py + modèles partagés
+- ✅ Modèles Pydantic centralisés dans `/app/backend/models.py`
+- ✅ Posts extraits vers `routes/posts.py` (156 lignes), Messages vers `routes/messages.py` (86 lignes)
+- ✅ Routers séparés par domaine : `ads_router`, `posts_router`, `messages_router`
+- 📊 server.py 4197 → 3967 (-230). 29/29 nouveaux + 36/36 régression.
 - ✅ **Modèles Pydantic centralisés** dans `/app/backend/models.py` (PostIn, PostMedia, LinkPreview, CommentIn, MessageIn, MessageAttachment) — fini la duplication
 - ✅ **Posts** extraits vers `/app/backend/routes/posts.py` (156 lignes — create, list, like, comment, comments, link-preview avec cache)
 - ✅ **Messages** extraits vers `/app/backend/routes/messages.py` (86 lignes — send, conversations, get)
