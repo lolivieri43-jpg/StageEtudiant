@@ -49,7 +49,10 @@ export default function OffersPage() {
   const source = params.get("source") || "";
   const nearCity = params.get("near_city") || "";
   const distanceKm = params.get("distance_km") || "50";
-  const includeLba = params.get("lba") !== "0"; // include La Bonne Alternance by default
+  const includeLba = params.get("lba") !== "0";
+  const companyFilter = params.get("company") || "";
+  const country = params.get("country") || "";          // 'europe', 'Belgique', etc.
+  const europeanOnly = params.get("european") === "1";
   const [cityList, setCityList] = useState([]);
 
   useEffect(() => {
@@ -117,19 +120,34 @@ export default function OffersPage() {
       if (level) p.set("level", level);
       if (remote) p.set("remote", "true");
       if (source) p.set("source", source);
+      if (companyFilter) p.set("company", companyFilter);
+      if (country) p.set("country", country);
+      if (europeanOnly) p.set("european_only", "true");
+      if (nearCity) {
+        p.set("city", nearCity);  // override city with the geo center
+        p.set("radius_km", distanceKm);
+      }
       p.set("limit", "300");
       const r = await api.get(`/offers?${p.toString()}`);
       return r.data;
     };
     const fetchKeyless = async () => {
-      // include external keyless + keyed aggregated sources when no specific source filter
-      // OR when a specific external source is selected (we'll filter client-side)
       const EXT_SOURCES = new Set(["Adzuna", "Jooble", "EURES", "Ashby", "Arbeitnow",
                                     "Remotive", "RemoteOK", "Jobicy", "Greenhouse"]);
       if (lbaOnly || ftOnly) return [];
       if (source && !EXT_SOURCES.has(source)) return [];
       try {
-        const { data } = await api.get('/external-offers/all');
+        const ep = new URLSearchParams();
+        if (companyFilter) ep.set("company", companyFilter);
+        if (nearCity) {
+          ep.set("city", nearCity);
+          ep.set("radius_km", distanceKm);
+        } else if (city) {
+          ep.set("city", city);
+        }
+        if (country) ep.set("country", country);
+        if (europeanOnly) ep.set("european_only", "true");
+        const { data } = await api.get(`/external-offers/all?${ep.toString()}`);
         const all = data.results || [];
         return source ? all.filter(o => o.source === source) : all;
       } catch (err) {
@@ -151,7 +169,7 @@ export default function OffersPage() {
         setOffers(merged);
       })
       .finally(() => setLoading(false));
-  }, [q, region, city, ct, domain, level, remote, source, nearCity, distanceKm, includeLba]);
+  }, [q, region, city, ct, domain, level, remote, source, nearCity, distanceKm, includeLba, companyFilter, country, europeanOnly]);
 
   const updateParam = (k, v) => {
     const p = new URLSearchParams(params);
@@ -177,6 +195,11 @@ export default function OffersPage() {
         <div>
           <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Ville</label>
           <Input data-testid="filter-city" value={city} onChange={(e) => updateParam("city", e.target.value)} placeholder="Paris, Lyon..." className="rounded-xl" />
+        </div>
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Entreprise</label>
+          <Input data-testid="filter-company" value={companyFilter} onChange={(e) => updateParam("company", e.target.value)} placeholder="Ex: EDF, SNCF..." className="rounded-xl" />
+          {companyFilter && <div className="text-[10px] text-slate-500 mt-1">Filtre strict (accents/majuscules ignorés)</div>}
         </div>
         <div>
           <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Type de contrat</label>
@@ -206,6 +229,54 @@ export default function OffersPage() {
             {SOURCES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
         </div>
+        <div className="bg-gradient-to-br from-emerald-50 to-blue-50 rounded-xl p-4 -mx-2" data-testid="europe-section">
+          <label className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-2 block flex items-center gap-1">
+            🇪🇺 Pays européens
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm" data-testid="filter-european-only">
+            <input type="checkbox"
+                   checked={europeanOnly}
+                   onChange={(e) => {
+                     const p = new URLSearchParams(params);
+                     if (e.target.checked) {
+                       p.set("european", "1");
+                       p.delete("country");
+                     } else {
+                       p.delete("european");
+                     }
+                     setParams(p);
+                   }}
+                   className="accent-emerald-600" />
+            <span>Voir uniquement les offres hors France</span>
+          </label>
+          {europeanOnly && (
+            <div className="mt-2">
+              <select value={country} onChange={(e) => updateParam("country", e.target.value)}
+                      className="w-full rounded-xl border-0 bg-white px-3 h-9 text-sm"
+                      data-testid="filter-country">
+                <option value="">Tous les pays UE</option>
+                <option value="Belgique">Belgique</option>
+                <option value="Suisse">Suisse</option>
+                <option value="Luxembourg">Luxembourg</option>
+                <option value="Allemagne">Allemagne / Germany</option>
+                <option value="Espagne">Espagne / Spain</option>
+                <option value="Italie">Italie / Italy</option>
+                <option value="Royaume-Uni">Royaume-Uni / UK</option>
+                <option value="Pays-Bas">Pays-Bas / Netherlands</option>
+                <option value="Portugal">Portugal</option>
+                <option value="Irlande">Irlande / Ireland</option>
+                <option value="Autriche">Autriche / Austria</option>
+                <option value="Pologne">Pologne / Poland</option>
+              </select>
+            </div>
+          )}
+          {!europeanOnly && (
+            <div className="text-[10px] text-emerald-700 mt-2 leading-snug">
+              ✓ Par défaut, seules les offres en <b>France</b> sont affichées
+            </div>
+          )}
+        </div>
+
         <div className="bg-gradient-to-br from-blue-50 to-violet-50 rounded-xl p-4 -mx-2">
           <label className="text-xs font-bold uppercase tracking-wider text-violet-700 mb-2 block">Rayon autour d'une ville</label>
           <select value={nearCity} onChange={(e) => updateParam("near_city", e.target.value)} className="w-full rounded-xl border-0 bg-white px-3 h-10 text-sm" data-testid="filter-near-city">

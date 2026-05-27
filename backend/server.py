@@ -348,34 +348,90 @@ async def list_offers(
     q: Optional[str] = None,
     region: Optional[str] = None,
     city: Optional[str] = None,
+    radius_km: Optional[float] = None,
     contract_type: Optional[str] = None,
     domain: Optional[str] = None,
     level: Optional[str] = None,
     remote: Optional[bool] = None,
+    company: Optional[str] = None,        # NEW: strict company name filter (accent-insensitive)
     company_id: Optional[str] = None,
     source: Optional[str] = None,
+    country: Optional[str] = None,        # NEW: ISO/name filter, or 'europe' / 'france'
+    european_only: bool = False,          # NEW: shortcut for the EU category
     limit: int = 200,
 ):
-    query = {}
+    from geo_search import (
+        normalize_text, companies_match, company_contains_term,
+        haversine_km, geocode_french_city, offer_coords,
+        is_french, is_european, countries_match,
+    )
+    query: dict = {"is_demo": {"$ne": True}}
     if q:
         query["$or"] = [
             {"title": {"$regex": q, "$options": "i"}},
             {"description": {"$regex": q, "$options": "i"}},
             {"domain": {"$regex": q, "$options": "i"}},
         ]
-    if region: query["region"] = region
-    if city: query["city"] = {"$regex": city, "$options": "i"}
-    if contract_type: query["contract_type"] = contract_type
-    if domain: query["domain"] = {"$regex": domain, "$options": "i"}
-    if level: query["level"] = level
-    if remote is not None: query["remote"] = remote
-    if company_id: query["company_id"] = company_id
-    if source: query["source"] = source
-    # Phase F: never show demo offers in production listings
-    query["is_demo"] = {"$ne": True}
-    # Sort: source_priority DESC (StageEtudiant first), then date DESC
-    offers = await db.offers.find(query, {"_id": 0}).sort([("source_priority", -1), ("created_at", -1)]).limit(min(limit, 500)).to_list(min(limit, 500))
-    return offers
+    if region:
+        query["region"] = region
+    if contract_type:
+        query["contract_type"] = contract_type
+    if domain:
+        query["domain"] = {"$regex": domain, "$options": "i"}
+    if level:
+        query["level"] = level
+    if remote is not None:
+        query["remote"] = remote
+    if company_id:
+        query["company_id"] = company_id
+    if source:
+        query["source"] = source
+
+    fetch_limit = min(max(limit, 200), 1000) * 2
+    offers = await db.offers.find(query, {"_id": 0}).sort(
+        [("source_priority", -1), ("created_at", -1)]
+    ).limit(fetch_limit).to_list(fetch_limit)
+
+    # ---------- Country / Europe filtering (Phase Search v2) ----------
+    if european_only or (country and normalize_text(country) == "europe"):
+        offers = [o for o in offers if is_european(o.get("country")) and not is_french(o.get("country"))]
+    elif country:
+        # exact country match (accent-insensitive)
+        ncountry = normalize_text(country)
+        offers = [o for o in offers if normalize_text(o.get("country") or "France") == ncountry]
+    else:
+        # Default: prioritize French offers, exclude European-only ones
+        offers = [o for o in offers if is_french(o.get("country"))]
+
+    # ---------- Strict company filter ----------
+    if company:
+        offers = [o for o in offers
+                  if companies_match(o.get("company_name"), company)
+                  or company_contains_term(o.get("company_name"), company)]
+
+    # ---------- City filter (loose match) ----------
+    if city and not radius_km:
+        ncity = normalize_text(city)
+        offers = [o for o in offers if ncity in normalize_text(o.get("city"))]
+
+    # ---------- Radius filter ----------
+    if radius_km and radius_km > 0:
+        center = geocode_french_city(city)
+        if not center:
+            raise HTTPException(400, "Ville inconnue pour le filtre par rayon. Choisissez une ville française du référentiel.")
+        clat, clon = center
+        kept = []
+        for o in offers:
+            coords = offer_coords(o)
+            if not coords:
+                # As per requirement: exclude offers without reliable location
+                continue
+            if haversine_km(clat, clon, coords[0], coords[1]) <= radius_km:
+                o["_distance_km"] = round(haversine_km(clat, clon, coords[0], coords[1]), 1)
+                kept.append(o)
+        offers = sorted(kept, key=lambda x: x.get("_distance_km", 9999))
+
+    return offers[: min(limit, 500)]
 
 @api.get("/offers/regions")
 async def offers_by_region():
@@ -1460,8 +1516,11 @@ def get_coords(city: Optional[str]):
 
 @api.get("/cities")
 async def list_cities():
-    """Return list of geocodable cities for frontend autocomplete."""
-    return {"cities": sorted([c.title() for c in CITY_COORDS.keys()])}
+    """Return list of geocodable cities (FR_CITIES from geo_search + legacy CITY_COORDS)."""
+    from geo_search import FR_CITIES
+    all_cities = set([c.title() for c in CITY_COORDS.keys()] + [c.title() for c in FR_CITIES.keys()])
+    all_cities.discard("Europe")  # internal fallback
+    return {"cities": sorted(all_cities)}
 
 @api.get("/offers-nearby")
 async def offers_nearby(city: str, distance_km: float = 50, limit: int = 200,
@@ -3397,8 +3456,21 @@ async def get_keyed_offers(
 
 
 @ext_offers_api.get("/external-offers/all")
-async def get_all_external_offers(force_refresh: bool = False):
-    """Aggregate keyless + keyed external sources in one call (parallel)."""
+async def get_all_external_offers(
+    force_refresh: bool = False,
+    company: Optional[str] = None,
+    city: Optional[str] = None,
+    radius_km: Optional[float] = None,
+    country: Optional[str] = None,
+    european_only: bool = False,
+):
+    """Aggregate keyless + keyed external sources in one call (parallel)
+    and apply the same strict filters as /api/offers."""
+    from geo_search import (
+        normalize_text, companies_match, company_contains_term,
+        haversine_km, geocode_french_city, offer_coords,
+        is_french, is_european,
+    )
     keyless, keyed = await asyncio.gather(
         fetch_all_keyless(db, force_refresh=force_refresh),
         fetch_all_keyed(db, force_refresh=force_refresh),
@@ -3415,6 +3487,42 @@ async def get_all_external_offers(force_refresh: bool = False):
         if k:
             seen.add(k)
         merged.append(o)
+
+    # Country / European filter
+    if european_only or (country and normalize_text(country) == "europe"):
+        merged = [o for o in merged if is_european(o.get("country")) and not is_french(o.get("country"))]
+    elif country:
+        nc = normalize_text(country)
+        merged = [o for o in merged if normalize_text(o.get("country") or "France") == nc]
+    else:
+        # Default: prioritize French offers
+        merged = [o for o in merged if is_french(o.get("country"))]
+
+    # Strict company filter
+    if company:
+        merged = [o for o in merged
+                  if companies_match(o.get("company_name"), company)
+                  or company_contains_term(o.get("company_name"), company)]
+
+    # Radius filter (strict — drops offers with no coords)
+    if radius_km and radius_km > 0:
+        center = geocode_french_city(city)
+        if center:
+            clat, clon = center
+            kept = []
+            for o in merged:
+                coords = offer_coords(o)
+                if not coords:
+                    continue
+                d = haversine_km(clat, clon, coords[0], coords[1])
+                if d <= radius_km:
+                    o["_distance_km"] = round(d, 1)
+                    kept.append(o)
+            merged = sorted(kept, key=lambda x: x.get("_distance_km", 9999))
+    elif city:
+        ncity = normalize_text(city)
+        merged = [o for o in merged if ncity in normalize_text(o.get("city"))]
+
     by_source = {**keyless.get("by_source", {}), **keyed.get("by_source", {})}
     return {
         "results": merged,
@@ -3568,7 +3676,31 @@ async def startup():
         logger.warning(f"Storage init deferred: {e}")
     # Mongo indexes
     await ensure_indexes()
+    # Ensure the personal owner-admin account exists (idempotent, always run)
+    await ensure_owner_admin()
 
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
+
+async def ensure_owner_admin():
+    """Idempotently make sure the owner admin (bernardolivieri1326@gmail.com) exists
+    and has role=admin. Preserves the existing password if the account already exists."""
+    email = "bernardolivieri1326@gmail.com"
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        if existing.get("role") != "admin":
+            await db.users.update_one({"email": email}, {"$set": {"role": "admin"}})
+            logger.info("Owner admin role enforced for %s", email)
+        return
+    await db.users.insert_one({
+        "user_id": "user_owner_admin",
+        "email": email,
+        "password": hash_password("OwnerAdmin2026!"),
+        "name": "Bernard Olivieri",
+        "role": "admin",
+        "profile": {"verified": True, "owner": True},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    logger.info("Created owner admin user %s (default password 'OwnerAdmin2026!' — please change at first login)", email)

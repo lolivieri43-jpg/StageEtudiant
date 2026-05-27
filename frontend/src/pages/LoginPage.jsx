@@ -17,9 +17,15 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(email, password);
+      const u = await login(email, password);
       toast.success("Connexion réussie");
-      navigate("/dashboard");
+      // Auto-redirect admins (and especially the owner) to the admin dashboard
+      const isOwner = (u?.email || email).toLowerCase() === "bernardolivieri1326@gmail.com";
+      if (u?.role === "admin" || isOwner) {
+        navigate("/admin");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Erreur de connexion");
     } finally {

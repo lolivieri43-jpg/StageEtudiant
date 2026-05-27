@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag, Sun, Moon, Building2 } from "lucide-react";
+import { Search, Bell, MessageSquare, Home, Users, Briefcase, LogOut, User, LayoutDashboard, Newspaper, Tag, Sun, Moon, Building2, Shield } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import api from "../lib/api";
@@ -103,6 +103,13 @@ export default function Header() {
               {unread > 0 && <span className="absolute top-0 right-2 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 grid place-items-center" data-testid="notif-badge">{unread}</span>}
               <span className="text-[10px] font-medium hidden md:inline">Alertes</span>
             </Link>
+
+            {user.role === "admin" && (
+              <Link to="/admin" className="hidden md:flex flex-col items-center px-3 py-1 text-rose-600 hover:text-rose-700 font-bold" data-testid="nav-admin">
+                <Shield className="w-5 h-5" />
+                <span className="text-[10px] font-medium">Admin</span>
+              </Link>
+            )}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
