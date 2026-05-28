@@ -1,0 +1,23 @@
+{
+  "summary": "Iteration 18 — Strict offer search filters (company / city+radius / country / european_only) + owner admin (bernardolivieri1326@gmail.com) fully validated. 14/14 backend pytest pass on public URL. Frontend e2e: owner admin login redirects to /admin, nav-admin button visible only for admin, /offers shows filter-company input + green 'Pays européens' section with checkbox, european-only toggle returns 8 non-French offers with green country badges (Germany/UK/Portugal/Denmark). No bugs found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter18_search_v2.py",
+    "/app/test_reports/pytest/pytest_iter18.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 3700+ lines — eventually consider modularizing the offers/admin sections similar to how posts/messages/contacts/etc. were already extracted to /app/backend/routes/",
+    "The duplicate haversine_km call inside list_offers radius loop (line 427-428) recomputes distance twice — minor perf nit, cache the value once."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter18_search_v2.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "Owner admin: bernardolivieri1326@gmail.com / OwnerAdmin2026! ✓; Candidat: lucas.martin@email.fr / Demo1234! ✓; Company: hr@technova.fr / Demo1234! ✓",
+  "seed_data_creation": "Created 1 ephemeral test offer + 1 test deal via API; both prefixed 'TEST_iter18' for manual cleanup if desired. Used existing seed-v3 companies (BrightStudio011, AlphaGroup028, etc.) for filter assertions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend tests reusable at /app/backend/tests/test_iter18_search_v2.py (run with REACT_APP_BACKEND_URL env var). The /api/external-offers/all endpoint accepts european_only=true / country=Allemagne|Royaume-Uni|Germany|UK and returns aggregated keyless+keyed external offers. /api/offers returns _distance_km when radius_km is set. Owner admin is reseeded idempotently at startup (ensure_owner_admin)."
+}

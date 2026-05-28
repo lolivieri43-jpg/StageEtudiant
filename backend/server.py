@@ -396,9 +396,7 @@ async def list_offers(
     if european_only or (country and normalize_text(country) == "europe"):
         offers = [o for o in offers if is_european(o.get("country")) and not is_french(o.get("country"))]
     elif country:
-        # exact country match (accent-insensitive)
-        ncountry = normalize_text(country)
-        offers = [o for o in offers if normalize_text(o.get("country") or "France") == ncountry]
+        offers = [o for o in offers if countries_match(country, o.get("country") or "France")]
     else:
         # Default: prioritize French offers, exclude European-only ones
         offers = [o for o in offers if is_french(o.get("country"))]
@@ -3469,7 +3467,7 @@ async def get_all_external_offers(
     from geo_search import (
         normalize_text, companies_match, company_contains_term,
         haversine_km, geocode_french_city, offer_coords,
-        is_french, is_european,
+        is_french, is_european, countries_match,
     )
     keyless, keyed = await asyncio.gather(
         fetch_all_keyless(db, force_refresh=force_refresh),
@@ -3492,8 +3490,7 @@ async def get_all_external_offers(
     if european_only or (country and normalize_text(country) == "europe"):
         merged = [o for o in merged if is_european(o.get("country")) and not is_french(o.get("country"))]
     elif country:
-        nc = normalize_text(country)
-        merged = [o for o in merged if normalize_text(o.get("country") or "France") == nc]
+        merged = [o for o in merged if countries_match(country, o.get("country") or "France")]
     else:
         # Default: prioritize French offers
         merged = [o for o in merged if is_french(o.get("country"))]

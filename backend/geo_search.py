@@ -287,13 +287,13 @@ COUNTRY_ALIASES: dict[str, set[str]] = {
 def countries_match(filter_val: str, offer_country: Optional[str]) -> bool:
     """True if user filter (e.g. 'Allemagne') matches offer.country ('Germany' / 'DE' / etc.)."""
     if not offer_country:
-        # Unknown country: only matches if filter is france/fr (default treatment)
         return normalize_text(filter_val) in ("france", "fr")
-    f_norm = normalize_text(filter_val)
-    o_norm = normalize_text(offer_country)
+    f_norm = normalize_text(filter_val).replace("-", " ")
+    o_norm = normalize_text(offer_country).replace("-", " ")
     if f_norm == o_norm:
         return True
     for canon, aliases in COUNTRY_ALIASES.items():
-        if f_norm in aliases and o_norm in aliases:
+        canon_n = canon.replace("-", " ")
+        if (f_norm == canon_n or f_norm in aliases) and (o_norm == canon_n or o_norm in aliases):
             return True
     return False
