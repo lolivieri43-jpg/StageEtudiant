@@ -25,6 +25,15 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 19 (2026-02-28) — Phase Q : Premium, Filtres explicites, Profil officiel, À propos & Géocoding élargi
+- ✅ **PremiumBadge** réutilisable (`/app/frontend/src/components/PremiumBadge.jsx`) avec helper `isPremiumActive` (vérifie `is_premium`, `premium_status='active'`, `premium_end_date` non expirée). Badges affichés sur : `OfferCard`, `SearchStudentsPage`, `ContactsPage`, `MessagesPage` (liste + en-tête conversation), `ProfilePage`, `ApplicationDetailPage`. Tri prioritaire premium-first dans `/api/offers` et `/api/offers-nearby` (helper backend `_enrich_offers_with_premium` qui joint les offres aux utilisateurs `company` premium actifs).
+- ✅ **Bouton "Rechercher" explicite** sur `OffersPage` (data-testid=`apply-filters-btn`) + `SearchStudentsPage` (`apply-students-btn`) : draft state interne, l'envoi de la requête API n'a lieu QUE sur clic. Inclut bouton Réinitialiser, état de chargement, message d'aide « Sélectionnez vos critères puis cliquez sur Rechercher », compteur de résultats live (`results-count`).
+- ✅ **Profil officiel StageEtudiant.com** : page admin `/admin/official-profile` avec preview live (bannière, avatar, slogan, badge "Compte officiel" bleu), formulaire (nom, slogan, description, URLs photo/bannière, couleur principale, site web, email contact, visibilité). `GET /api/official-profile` public, `PATCH /api/admin/official-profile` gardé admin. Noms réservés au register (`StageEtudiant.com`, `stage etudiant`, `stageetudiant`, `admin`, `support`, `moderation`) → HTTP 400.
+- ✅ **Page publique `/a-propos`** (et alias `/about`) : hero, sections "Pour les étudiants/entreprises/CFA", "Notre objectif", "Pourquoi utiliser StageEtudiant.com ?", CTA buttons → /register et /offers. Mode clair/sombre compatible. Liens "À propos" ajoutés au header (anonyme + menu utilisateur) et au footer du LandingPage.
+- ✅ **Géocoding élargi** : `get_coords_async()` côté backend → 1) `CITY_COORDS` legacy, 2) `FR_CITIES` (`geo_search`), 3) fallback Nominatim/OSM (User-Agent propre, cache Mongo 30 j, logs `geocoding_api_logs`). `/api/offers-nearby` et `/api/search/students-nearby` utilisent désormais ce fallback : les villes hors FR_CITIES (ex: Saumur, Sablé-sur-Sarthe) sont géocodées automatiquement. Si introuvable → message clair « Ville introuvable, vérifiez l'orthographe ou élargissez la recherche. »
+- ✅ Tests Iteration 19 : 12/12 backend pytest (`/app/backend/tests/test_iter19_phaseI.py`) + flux frontend complet validé par testing agent (100 % succès).
+
+
 ## Iteration 8 (2026-02) — Phase B : Annuaire d'Entreprises officiel
 - ✅ **API Recherche d'Entreprises (gouv.fr)** : publique, sans clé, intégrée via `/app/backend/external_companies.py` (normalize + cache)
 - ✅ **Endpoints** : `GET /api/companies/search?q&code_postal&departement&region&activite_principale&page&per_page` (400 si pas de critère) ; `GET /api/companies/siret/{siret}` (404 si inconnu)
