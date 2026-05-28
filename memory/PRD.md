@@ -25,6 +25,12 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 20 (2026-02-28) — Phase R : Recherche fine + Split server.py (Phase 2)
+- ✅ **Recherche étudiant flexible** : `/api/search/students` `q` cherche désormais dans `name`, `profile.first_name`, `profile.last_name` (l'entreprise peut taper le prénom ou le nom seul).
+- ✅ **Recherche d'offres par entreprise précise** : la saisie « Entreprise précise » sur OffersPage déclenche désormais aussi un appel à `/api/francetravail/search?q=<nom>` (avec post-filtre client côté nom d'entreprise, accents-insensible). Permet par exemple de trouver les offres « Sofratom » au-delà des sources internes. `/api/offers` `q` cherche aussi dans `company_name`.
+- ✅ **Split server.py — Phase 2** : extraction de quatre nouveaux routers `routes/auth.py` (151 l), `routes/users.py` (65 l), `routes/offers.py` (222 l), `routes/admin.py` (63 l). Pattern `register_xxx_routes(api, db, get_current_user, …)` réutilisé. `_enrich_offers_with_premium` exposé par `register_offers_routes.enrich` pour rester accessible depuis `/offers-nearby` (toujours dans server.py). **Bilan** : `server.py` passe de **3899 → 3542 lignes** (-9 %). Tests régression 15/15 passés (`/app/test_reports/iteration_20.json`).
+
+
 ## Iteration 19 (2026-02-28) — Phase Q : Premium, Filtres explicites, Profil officiel, À propos & Géocoding élargi
 - ✅ **PremiumBadge** réutilisable (`/app/frontend/src/components/PremiumBadge.jsx`) avec helper `isPremiumActive` (vérifie `is_premium`, `premium_status='active'`, `premium_end_date` non expirée). Badges affichés sur : `OfferCard`, `SearchStudentsPage`, `ContactsPage`, `MessagesPage` (liste + en-tête conversation), `ProfilePage`, `ApplicationDetailPage`. Tri prioritaire premium-first dans `/api/offers` et `/api/offers-nearby` (helper backend `_enrich_offers_with_premium` qui joint les offres aux utilisateurs `company` premium actifs).
 - ✅ **Bouton "Rechercher" explicite** sur `OffersPage` (data-testid=`apply-filters-btn`) + `SearchStudentsPage` (`apply-students-btn`) : draft state interne, l'envoi de la requête API n'a lieu QUE sur clic. Inclut bouton Réinitialiser, état de chargement, message d'aide « Sélectionnez vos critères puis cliquez sur Rechercher », compteur de résultats live (`results-count`).
