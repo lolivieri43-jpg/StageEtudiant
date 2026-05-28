@@ -78,7 +78,7 @@ export default function SearchStudentsPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <Input value={draft.q} onChange={(e) => setDraft({ ...draft, q: e.target.value })} placeholder="Nom" className="rounded-xl pl-9" data-testid="filter-q" />
+              <Input value={draft.q} onChange={(e) => setDraft({ ...draft, q: e.target.value })} placeholder="Nom, prénom…" className="rounded-xl pl-9" data-testid="filter-q" />
             </div>
             <select value={draft.level} onChange={(e) => setDraft({ ...draft, level: e.target.value })} className="rounded-xl border border-slate-200 dark:border-slate-700 h-10 px-3 bg-white dark:bg-slate-800" data-testid="filter-level">
               <option value="">Tous niveaux</option><option>Bac+2</option><option>Bac+3</option><option>Bac+5</option>

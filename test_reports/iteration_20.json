@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 20 — Regression after server.py routes split (auth/users/offers/admin → routes/*.py) + new search features. Backend: 15/15 pytest passed via /app/backend/tests/test_iter20_routes_split.py (auth login admin+company, /auth/me, reserved-name register=400, /users/{id} public profile, /offers list+regions=13+single+view-increment, /offers q matches company_name, /admin/stats gated+counts, /admin/grant-premium persistence, /search/students q matches first_name AND last_name AND name, role-gated). Frontend: /offers shows label 'Entreprise précise' + placeholder 'Ex: Sofratom, EDF, SNCF…', typing 'Sofratom' + Rechercher fires /api/francetravail/search?q=Sofratom AND /api/offers?company=Sofratom (no crash, URL=?company=Sofratom). /search/students has placeholder 'Nom, prénom…', searching 'Lucas' returns Lucas Martin card. Smoke: /offers, /a-propos, /admin/official-profile all load without console errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter20_routes_split.py",
+    "/app/test_reports/pytest/pytest_iter20.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is still 3543 lines — extracting auth(151)/users(65)/offers(222)/admin(63) into routes/*.py is good progress but server.py remains the bulk of the codebase. Consider next: extract /search/* endpoints (search_students, search/students-nearby ~line 978-1012, 1394), the massive /seed-v3 (~line 1017-1390) into a separate seed module, and the geocoding helpers if any remain.",
+    "routes/offers.py uses register_offers_routes.enrich = _enrich_offers_with_premium (attribute on function) as a back-channel for server.py /offers-nearby — works but fragile pattern. Cleaner: move /offers-nearby into routes/offers.py too, or import _enrich_offers_with_premium from a shared util module.",
+    "routes/auth.py line 55: 'from geo_search import normalize_text as _norm' is imported inside the request handler. Fine for cold-start but worth moving to module top-level since geo_search is already a dependency.",
+    "OffersPage.jsx /offers query: when company filter is set, 4 parallel requests fire (/api/offers, /api/lba/search, /api/francetravail/search, /api/external-offers/all). Verified working but no debounce — clicking Rechercher repeatedly can spam upstreams. Consider AbortController + button-disable during fetch.",
+    "Reserved-name guard in routes/auth.py (RESERVED_REGISTER_NAMES set) and the StageEtudiant.com platform-account guard are two separate sources of truth (the latter lives elsewhere). Confirm they stay in sync — duplication of 'StageEtudiant.com' rule in two places."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter20_routes_split.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin bernardolivieri1326@gmail.com / OwnerAdmin2026! ✓, Company hr@technova.fr / Demo1234! ✓, Candidate lucas.martin@email.fr / Demo1234! ✓ — all working per /app/memory/test_credentials.md",
+  "seed_data_creation": "None. Tests use pre-seeded users; grant-premium test toggles is_premium on hr@technova.fr (already premium-eligible per earlier iterations — left in 'active' state for 30 days).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All routes/*.py splits are functionally equivalent to the previous monolithic server.py. Search behavior for students now matches ANY of name|profile.first_name|profile.last_name (regex case-insensitive, accent-sensitive — UI normalizes). Offers q now also matches company_name. OffersPage company filter triggers FT (/api/francetravail/search?q=<value>) ALONG WITH internal /api/offers?company=<value> — confirmed by network inspection. Note for future tests: filter-company and apply-filters-btn data-testid are duplicated DOM (mobile + desktop sidebar) — use .last for desktop @1920px viewport. is_visible('text=Entreprise précise') returns False because of CSS uppercase transform; use get_attribute('placeholder') or locator with regex instead. Backend test file lives at /app/backend/tests/test_iter20_routes_split.py and now auto-loads REACT_APP_BACKEND_URL from /app/frontend/.env when env var is absent (safe pattern). 15/15 backend tests, all green.",
+  "rca of the issue": "No issues found. Routes split is clean, all endpoints respond exactly as before; new q-match features (students name fields + offers company_name) are correctly wired backend→frontend."
+}

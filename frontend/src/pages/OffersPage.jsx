@@ -113,9 +113,11 @@ export default function OffersPage() {
       if (!lbaOnly && a.contract_type && a.contract_type !== "alternance") return [];
       try {
         const lbaCity = a.near_city || a.city;
-        if (!lbaOnly && !lbaCity && !a.region) return [];
+        // For LBA-only OR when a company keyword is set, allow fetching without geo hint
+        if (!lbaOnly && !a.company && !lbaCity && !a.region) return [];
         const lp = new URLSearchParams();
         if (lbaCity) lp.set("city", lbaCity);
+        if (a.company) lp.set("romes", a.company); // LBA uses "romes" param; reusing for keyword passthrough
         lp.set("radius", a.near_city ? a.distance_km : "30");
         lp.set("per_page", lbaOnly ? "60" : "30");
         const { data } = await api.get(`/lba/search?${lp.toString()}`);
@@ -123,12 +125,15 @@ export default function OffersPage() {
       } catch { return []; }
     };
     const fetchFt = async () => {
-      if (!ftOnly) return [];
+      // ALSO trigger France Travail when the user types a company name (so Sofratom etc. is found)
+      const shouldFetchFt = ftOnly || (a.company && !lbaOnly);
+      if (!shouldFetchFt) return [];
       try {
         const fp = new URLSearchParams();
         if (a.city) fp.set("city", a.city);
         if (a.region) fp.set("region", a.region);
         if (a.q) fp.set("q", a.q);
+        if (a.company) fp.set("q", a.company);   // company name as keyword
         if (a.domain) fp.set("domain", a.domain);
         fp.set("per_page", "50");
         const { data } = await api.get(`/francetravail/search?${fp.toString()}`);
@@ -189,7 +194,20 @@ export default function OffersPage() {
           seen.add(k);
           merged.push(o);
         }
-        setOffers(merged);
+        // Apply company strict-ish filter on the merged set when set, in case FT
+        // returned tangentially-related results (keyword in description, not company).
+        let final = merged;
+        if (a.company) {
+          const term = a.company
+            .toLowerCase()
+            .normalize("NFD").replace(/\p{Diacritic}/gu, "")
+            .trim();
+          final = merged.filter(o => {
+            const name = (o.company_name || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+            return name.includes(term);
+          });
+        }
+        setOffers(final);
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -232,9 +250,13 @@ export default function OffersPage() {
           <Input data-testid="filter-city" value={draft.city} onChange={(e) => setDraftKey("city", e.target.value)} placeholder="Paris, Lyon..." className="rounded-xl" />
         </div>
         <div>
-          <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Entreprise</label>
-          <Input data-testid="filter-company" value={draft.company} onChange={(e) => setDraftKey("company", e.target.value)} placeholder="Ex: EDF, SNCF..." className="rounded-xl" />
-          {draft.company && <div className="text-[10px] text-slate-500 mt-1">Filtre strict (accents/majuscules ignorés)</div>}
+          <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Entreprise précise</label>
+          <Input data-testid="filter-company" value={draft.company} onChange={(e) => setDraftKey("company", e.target.value)} placeholder="Ex: Sofratom, EDF, SNCF…" className="rounded-xl" />
+          <div className="text-[10px] text-slate-500 mt-1">
+            {draft.company
+              ? "Filtre strict (accents/majuscules ignorés). Cherche dans toutes les sources."
+              : "Tapez le nom d'une entreprise pour voir uniquement ses offres"}
+          </div>
         </div>
         <div>
           <label className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 block">Type de contrat</label>

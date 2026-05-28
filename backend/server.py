@@ -185,339 +185,18 @@ def clean_user(u: dict) -> dict:
     u.pop("_id", None)
     return u
 
-# ============ AUTH ============
-@api.post("/auth/register")
-async def register(data: RegisterIn):
-    existing = await db.users.find_one({"email": data.email}, {"_id": 0})
-    if existing:
-        raise HTTPException(400, "Email déjà utilisé")
-    # Forbid reserved names so nobody can usurp the official StageEtudiant identity
-    from geo_search import normalize_text as _norm
-    _name_norm = _norm(data.name).replace(" ", "").replace(".", "")
-    _reserved = {"stageetudiant", "stageetudiantcom", "stageetudiantofficiel",
-                 "stagiaireconnect", "support", "moderation", "admin"}
-    if _name_norm in _reserved:
-        raise HTTPException(400, "Ce nom est réservé à la plateforme. Veuillez en choisir un autre.")
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    profile = {}
-    if data.role == "candidate":
-        parts = data.name.strip().split(" ", 1)
-        profile = {"first_name": parts[0], "last_name": parts[1] if len(parts) > 1 else "", "status": "en_recherche"}
-    elif data.role == "company":
-        profile = {"company_name": data.name, "verified": False}
-    doc = {
-        "user_id": user_id,
-        "email": data.email,
-        "password": hash_password(data.password),
-        "name": data.name,
-        "role": data.role,
-        "profile": profile,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "last_seen": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.users.insert_one(doc)
-    token = create_jwt(user_id)
-    return {"token": token, "user": clean_user({**doc})}
+# ============ AUTH — moved to routes/auth.py ============
+# ============ PROFILES / USERS — moved to routes/users.py ============
+from routes.auth import register_auth_routes
+from routes.users import register_users_routes
+register_auth_routes(api, db, get_current_user, hash_password, verify_password,
+                     create_jwt, clean_user, update_online)
+register_users_routes(api, db, get_current_user, get_optional_user)
 
-@api.post("/auth/login")
-async def login(data: LoginIn):
-    user = await db.users.find_one({"email": data.email})
-    if not user or not user.get("password") or not verify_password(data.password, user["password"]):
-        raise HTTPException(401, "Email ou mot de passe incorrect")
-    await update_online(user["user_id"])
-    token = create_jwt(user["user_id"])
-    return {"token": token, "user": clean_user({**user})}
-
-@api.post("/auth/session")
-async def emergent_session(data: SessionIn, response: Response):
-    try:
-        r = requests.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": data.session_id},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            raise HTTPException(401, "Session invalide")
-        info = r.json()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"Auth provider error: {e}")
-    email = info["email"]
-    name = info.get("name", email.split("@")[0])
-    picture = info.get("picture")
-    session_token = info["session_token"]
-    user = await db.users.find_one({"email": email})
-    if not user:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        parts = name.strip().split(" ", 1)
-        user = {
-            "user_id": user_id,
-            "email": email,
-            "name": name,
-            "role": "candidate",
-            "profile": {"first_name": parts[0], "last_name": parts[1] if len(parts) > 1 else "", "avatar": picture, "status": "en_recherche"},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "last_seen": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.users.insert_one(user)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await db.user_sessions.insert_one({
-        "user_id": user["user_id"],
-        "session_token": session_token,
-        "expires_at": expires_at.isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    response.set_cookie("session_token", session_token, max_age=7*24*3600, httponly=True, secure=True, samesite="none", path="/")
-    return {"user": clean_user({**user}), "token": session_token}
-
-@api.get("/auth/me")
-async def me(user=Depends(get_current_user)):
-    await update_online(user["user_id"])
-    return user
-
-@api.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    token = request.cookies.get("session_token")
-    if token:
-        await db.user_sessions.delete_many({"session_token": token})
-    response.delete_cookie("session_token", path="/")
-    return {"ok": True}
-
-# ============ PROFILES ============
-@api.put("/profile")
-async def update_profile(data: dict, user=Depends(get_current_user)):
-    profile = user.get("profile", {})
-    profile.update({k: v for k, v in data.items() if v is not None})
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"profile": profile}})
-    updated = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password": 0})
-    return updated
-
-@api.get("/users/{user_id}")
-async def get_user_public(user_id: str, viewer=Depends(get_optional_user)):
-    u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password": 0})
-    if not u:
-        raise HTTPException(404, "Utilisateur introuvable")
-    # Log a profile view (Phase A — a2). Dedupe: 1 view per (viewer,viewed) per 30 minutes.
-    if viewer and viewer["user_id"] != user_id:
-        try:
-            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
-            recent = await db.profile_views.find_one({
-                "viewer_user_id": viewer["user_id"],
-                "viewed_user_id": user_id,
-                "viewed_at": {"$gte": cutoff},
-            })
-            if not recent:
-                await db.profile_views.insert_one({
-                    "view_id": f"pv_{uuid.uuid4().hex[:12]}",
-                    "viewer_user_id": viewer["user_id"],
-                    "viewer_name": viewer.get("name"),
-                    "viewer_avatar": viewer.get("profile", {}).get("avatar") or viewer.get("profile", {}).get("logo"),
-                    "viewer_role": viewer.get("role"),
-                    "viewed_user_id": user_id,
-                    "viewed_role": u.get("role"),
-                    "viewed_at": datetime.now(timezone.utc).isoformat(),
-                })
-        except Exception as e:
-            logger.warning(f"profile_view log failed: {e}")
-    return u
-
-@api.get("/users")
-async def list_users(role: Optional[str] = None, limit: int = 20):
-    q = {}
-    if role:
-        q["role"] = role
-    users = await db.users.find(q, {"_id": 0, "password": 0}).limit(limit).to_list(limit)
-    return users
-
-# ============ OFFERS ============
-@api.post("/offers")
-async def create_offer(data: OfferIn, user=Depends(get_current_user)):
-    if user["role"] != "company":
-        raise HTTPException(403, "Réservé aux entreprises")
-    offer_id = f"off_{uuid.uuid4().hex[:12]}"
-    doc = {
-        "offer_id": offer_id,
-        "company_id": user["user_id"],
-        "company_name": user.get("profile", {}).get("company_name") or user["name"],
-        "company_logo": user.get("profile", {}).get("logo"),
-        "verified": user.get("profile", {}).get("verified", False),
-        **data.model_dump(),
-        "views": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.offers.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
-
-async def _enrich_offers_with_premium(offers: list) -> None:
-    """Adds company_is_premium / company_premium_status / company_premium_end_date
-    on each offer (in-place), batched by unique company_id."""
-    if not offers:
-        return
-    ids = {o.get("company_id") for o in offers if o.get("company_id")}
-    if not ids:
-        return
-    cursor = db.users.find(
-        {"user_id": {"$in": list(ids)}, "role": "company"},
-        {"_id": 0, "user_id": 1, "profile.is_premium": 1, "profile.premium_status": 1, "profile.premium_end_date": 1},
-    )
-    premium_by_id: dict = {}
-    async for u in cursor:
-        p = u.get("profile", {}) or {}
-        premium_by_id[u["user_id"]] = {
-            "is_premium": bool(p.get("is_premium")),
-            "premium_status": p.get("premium_status"),
-            "premium_end_date": p.get("premium_end_date"),
-            "active": _premium_active_from_doc({
-                "is_premium": p.get("is_premium"),
-                "premium_status": p.get("premium_status"),
-                "premium_end_date": p.get("premium_end_date"),
-            }),
-        }
-    for o in offers:
-        cid = o.get("company_id")
-        info = premium_by_id.get(cid)
-        if not info:
-            continue
-        o["company_is_premium"] = bool(info["active"])
-        o["company_premium_status"] = info["premium_status"]
-        o["company_premium_end_date"] = info["premium_end_date"]
-
-
-@api.get("/offers")
-async def list_offers(
-    q: Optional[str] = None,
-    region: Optional[str] = None,
-    city: Optional[str] = None,
-    radius_km: Optional[float] = None,
-    contract_type: Optional[str] = None,
-    domain: Optional[str] = None,
-    level: Optional[str] = None,
-    remote: Optional[bool] = None,
-    company: Optional[str] = None,        # NEW: strict company name filter (accent-insensitive)
-    company_id: Optional[str] = None,
-    source: Optional[str] = None,
-    country: Optional[str] = None,        # NEW: ISO/name filter, or 'europe' / 'france'
-    european_only: bool = False,          # NEW: shortcut for the EU category
-    limit: int = 200,
-):
-    from geo_search import (
-        normalize_text, companies_match, company_contains_term,
-        haversine_km, geocode_french_city, offer_coords,
-        is_french, is_european, countries_match,
-    )
-    query: dict = {"is_demo": {"$ne": True}}
-    if q:
-        query["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}},
-            {"domain": {"$regex": q, "$options": "i"}},
-        ]
-    if region:
-        query["region"] = region
-    if contract_type:
-        query["contract_type"] = contract_type
-    if domain:
-        query["domain"] = {"$regex": domain, "$options": "i"}
-    if level:
-        query["level"] = level
-    if remote is not None:
-        query["remote"] = remote
-    if company_id:
-        query["company_id"] = company_id
-    if source:
-        query["source"] = source
-
-    fetch_limit = min(max(limit, 200), 1000) * 2
-    offers = await db.offers.find(query, {"_id": 0}).sort(
-        [("source_priority", -1), ("created_at", -1)]
-    ).limit(fetch_limit).to_list(fetch_limit)
-
-    # ---------- Country / Europe filtering (Phase Search v2) ----------
-    if european_only or (country and normalize_text(country) == "europe"):
-        offers = [o for o in offers if is_european(o.get("country")) and not is_french(o.get("country"))]
-    elif country:
-        offers = [o for o in offers if countries_match(country, o.get("country") or "France")]
-    else:
-        # Default: prioritize French offers, exclude European-only ones
-        offers = [o for o in offers if is_french(o.get("country"))]
-
-    # ---------- Strict company filter ----------
-    if company:
-        offers = [o for o in offers
-                  if companies_match(o.get("company_name"), company)
-                  or company_contains_term(o.get("company_name"), company)]
-
-    # ---------- City filter (loose match) ----------
-    if city and not radius_km:
-        ncity = normalize_text(city)
-        offers = [o for o in offers if ncity in normalize_text(o.get("city"))]
-
-    # ---------- Radius filter ----------
-    if radius_km and radius_km > 0:
-        from geo_search import geocode_nominatim as _geocode_nominatim
-        center = geocode_french_city(city)
-        if not center:
-            # Fallback to Nominatim/OSM (with 30-day Mongo cache)
-            fallback = await _geocode_nominatim(db, city or "")
-            if fallback:
-                center = (fallback[0], fallback[1])
-        if not center:
-            raise HTTPException(400, "Ville introuvable, vérifiez l'orthographe ou élargissez la recherche.")
-        clat, clon = center
-        kept = []
-        for o in offers:
-            coords = offer_coords(o)
-            if not coords:
-                # As per requirement: exclude offers without reliable location
-                continue
-            d = haversine_km(clat, clon, coords[0], coords[1])
-            if d <= radius_km:
-                o["_distance_km"] = round(d, 1)
-                kept.append(o)
-        offers = sorted(kept, key=lambda x: x.get("_distance_km", 9999))
-
-    offers = offers[: min(limit, 500)]
-    await _enrich_offers_with_premium(offers)
-    # Premium-first ordering (stable for non-premium)
-    offers.sort(key=lambda o: 0 if o.get("company_is_premium") else 1)
-    return offers
-
-@api.get("/offers/regions")
-async def offers_by_region():
-    offers = await db.offers.find({}, {"_id": 0, "region": 1, "company_id": 1}).to_list(1000)
-    region_offers = Counter(o["region"] for o in offers if o.get("region"))
-    region_companies = {}
-    for o in offers:
-        r = o.get("region")
-        if r:
-            region_companies.setdefault(r, set()).add(o["company_id"])
-    return {
-        "by_region": [
-            {"region": r, "offers": region_offers[r], "companies": len(region_companies.get(r, set()))}
-            for r in region_offers
-        ]
-    }
-
-@api.get("/offers/{offer_id}")
-async def get_offer(offer_id: str):
-    offer = await db.offers.find_one({"offer_id": offer_id}, {"_id": 0})
-    if not offer:
-        raise HTTPException(404, "Offre introuvable")
-    await db.offers.update_one({"offer_id": offer_id}, {"$inc": {"views": 1}})
-    offer["views"] = offer.get("views", 0) + 1
-    return offer
-
-@api.delete("/offers/{offer_id}")
-async def delete_offer(offer_id: str, user=Depends(get_current_user)):
-    offer = await db.offers.find_one({"offer_id": offer_id})
-    if not offer:
-        raise HTTPException(404, "Introuvable")
-    if offer["company_id"] != user["user_id"] and user["role"] != "admin":
-        raise HTTPException(403, "Interdit")
-    await db.offers.delete_one({"offer_id": offer_id})
-    return {"ok": True}
+# ============ OFFERS — moved to routes/offers.py ============
+from routes.offers import register_offers_routes
+register_offers_routes(api, db, get_current_user, lambda d: _premium_active_from_doc(d))
+_enrich_offers_with_premium = register_offers_routes.enrich  # alias for /offers-nearby below
 
 # ============ APPLICATIONS — moved to routes/applications.py ============
 
@@ -559,38 +238,9 @@ async def dashboard(user=Depends(get_current_user)):
             "recommended_offers": recommended,
         }
 
-# ============ ADMIN ============
-@api.get("/admin/stats")
-async def admin_stats(user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin uniquement")
-    return {
-        "users": await db.users.count_documents({}),
-        "companies": await db.users.count_documents({"role": "company"}),
-        "candidates": await db.users.count_documents({"role": "candidate"}),
-        "offers": await db.offers.count_documents({}),
-        "applications": await db.applications.count_documents({}),
-        "posts": await db.posts.count_documents({}),
-    }
-
-@api.get("/admin/users")
-async def admin_users(user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin uniquement")
-    return await db.users.find({}, {"_id": 0, "password": 0}).to_list(500)
-
-@api.post("/admin/verify/{user_id}")
-async def verify_company(user_id: str, user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin uniquement")
-    target = await db.users.find_one({"user_id": user_id})
-    if not target:
-        raise HTTPException(404, "Introuvable")
-    p = target.get("profile", {})
-    p["verified"] = True
-    await db.users.update_one({"user_id": user_id}, {"$set": {"profile": p}})
-    await db.offers.update_many({"company_id": user_id}, {"$set": {"verified": True}})
-    return {"ok": True}
+# ============ ADMIN — moved to routes/admin.py ============
+from routes.admin import register_admin_routes
+register_admin_routes(api, db, get_current_user)
 
 # ============ SEED ============
 @api.post("/seed")
@@ -1342,7 +992,15 @@ async def search_students(
         raise HTTPException(403, "Réservé aux entreprises")
     query = {"role": "candidate"}
     if q:
-        query["$or"] = [{"name": {"$regex": q, "$options": "i"}}]
+        # Search across full name, first_name and last_name (accent + case insensitive)
+        # Mongo regex doesn't strip diacritics; client-side already normalizes via the UI.
+        import re as _re
+        rx = {"$regex": _re.escape(q), "$options": "i"}
+        query["$or"] = [
+            {"name": rx},
+            {"profile.first_name": rx},
+            {"profile.last_name": rx},
+        ]
     if level: query["profile.level"] = level
     if domain: query["profile.domain"] = {"$regex": domain, "$options": "i"}
     if city: query["profile.city"] = {"$regex": city, "$options": "i"}
@@ -2129,21 +1787,7 @@ async def featured_candidates(limit: int = 12):
         p["is_premium"] = bool(p.get("profile", {}).get("is_premium"))
     return result
 
-@api.post("/admin/grant-premium/{user_id}")
-async def grant_premium(user_id: str, days: int = 30, user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin")
-    target = await db.users.find_one({"user_id": user_id})
-    if not target:
-        raise HTTPException(404, "Introuvable")
-    p = target.get("profile", {})
-    now = datetime.now(timezone.utc)
-    p["is_premium"] = True
-    p["premium_start_date"] = now.isoformat()
-    p["premium_end_date"] = (now + timedelta(days=days)).isoformat()
-    p["premium_status"] = "active"
-    await db.users.update_one({"user_id": user_id}, {"$set": {"profile": p}})
-    return {"ok": True, "until": p["premium_end_date"]}
+# grant_premium moved to routes/admin.py
 
 # ============ ITERATION 5: MONGO INDEXES ============
 async def ensure_indexes():
