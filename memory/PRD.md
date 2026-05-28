@@ -158,9 +158,30 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Rate limiting auth + protection brute-force
 - Split server.py en routers par domaine
 
-## Iteration 17 (2026-02) — Split de server.py (suite) + Modération du fil social
+## Iteration 18 (2026-02) — Recherche d'offres v2 + Owner admin
+- ✅ **Nouveau module `/app/backend/geo_search.py`** : normalize_text (accent-insensitive), companies_match (strict + word-boundary), haversine_km, geocode_french_city (~125 villes), EU_COUNTRIES + COUNTRY_ALIASES (FR↔EN↔ISO), countries_match
+- ✅ **`/api/offers` refondu** : 6 nouveaux params (`company`, `country`, `european_only`, `radius_km`, et city/source existants) — filtres stricts appliqués post-DB
+- ✅ **`/api/external-offers/all` aligné** : mêmes filtres pour offres externes (Adzuna, Ashby, Arbeitnow, etc.)
+- ✅ **France par défaut** : sans `european_only` ni `country`, on n'affiche que les offres FR (ou sans country, traitées comme FR)
+- ✅ **Catégorie "Pays européens"** : checkbox + dropdown 12 pays principaux (Belgique/Suisse/Luxembourg/Allemagne/Espagne/Italie/UK/Pays-Bas/Portugal/Irlande/Autriche/Pologne)
+- ✅ **Badge pays** sur OfferCard pour les offres non-FR + affichage distance `_distance_km` en mode rayon
+- ✅ **Owner admin auto-seedé** : `bernardolivieri1326@gmail.com` / `OwnerAdmin2026!` (idempotent via `ensure_owner_admin`)
+- ✅ **Redirect /admin automatique** après login pour role=admin (et notamment l'owner)
+- ✅ **Bouton "Admin" dans le header** visible uniquement pour role=admin (data-testid=nav-admin)
+- 📊 **Tests** : 14/14 backend + tous flows frontend critiques (iter 18)
+
+
 - ✅ **5 nouveaux splits** : `routes/contacts.py` (159), `routes/notifications.py` (21), `routes/deals.py` (227), `routes/moderation.py` (178), `routes/applications.py` (106)
 - ✅ **Modèles centralisés** : `ContactRequestIn`, `DealIn`, `ApplicationIn` ajoutés à `/app/backend/models.py`
+
+## Iteration 17 (2026-02) — Split de server.py (suite) + Modération du fil social
+- ✅ 5 nouveaux splits : routes/contacts.py (159), routes/notifications.py (21), routes/deals.py (227), routes/moderation.py (178), routes/applications.py (106)
+- ✅ Modèles centralisés (ContactRequestIn, DealIn, ApplicationIn) dans `/app/backend/models.py`
+- ✅ 8 routers actifs : ads + posts + messages + contacts + notifications + deals + moderation + applications = 1231 lignes externalisées
+- ✅ Signalements posts/comments (P2) avec 8 raisons, anti-doublon, refuse self-report
+- ✅ Queue admin /admin/reports + actions (Conserver/Supprimer/Archiver)
+- 📊 server.py 3967 → 3574 (-393)
+
 - ✅ **8 routers actifs** : ads + posts + messages + contacts + notifications + deals + moderation + applications = 1231 lignes externalisées
 - ✅ **Signalements posts/comments (P2)** : `POST /api/reports` (8 raisons, anti-doublon, refuse self-report), `GET /api/reports/mine`
 - ✅ **Queue admin** : `GET /api/admin/reports` (snapshot+compteurs), `POST /admin/reports/{id}/dismiss|remove`, notif auteur si supprimé

@@ -424,8 +424,9 @@ async def list_offers(
             if not coords:
                 # As per requirement: exclude offers without reliable location
                 continue
-            if haversine_km(clat, clon, coords[0], coords[1]) <= radius_km:
-                o["_distance_km"] = round(haversine_km(clat, clon, coords[0], coords[1]), 1)
+            d = haversine_km(clat, clon, coords[0], coords[1])
+            if d <= radius_km:
+                o["_distance_km"] = round(d, 1)
                 kept.append(o)
         offers = sorted(kept, key=lambda x: x.get("_distance_km", 9999))
 
