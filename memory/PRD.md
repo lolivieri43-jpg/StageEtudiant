@@ -25,6 +25,12 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 21 (2026-02-28) — Bug-fix : recherche entreprise & recherche stagiaire
+- 🐞 **Bug 1** — Filtre « Entreprise » sur /offers : auparavant `company_contains_term` exigeait un match en **mot entier** (regex `\b`). Taper « Beta » ne matchait pas « BetaSystems081 ». Correctif (`/app/backend/geo_search.py`) : substring match accent-insensible dès 3 caractères ; mot entier conservé pour ≤ 2 lettres (anti-bruit). Validation : `?company=Beta` → 3 offres (BetaSystems081 x2 + BetaTech065). `?company=Sofratom` → 0 (aucun enregistrement nulle part). `?company=a` → 0 (filtre court).
+- 🐞 **Bug 2** — `/search/students` : page bloquée pour le rôle `admin` (« Réservé aux entreprises »). Correctifs : `SearchStudentsPage.jsx` accepte `admin` ; entrée `Rechercher des étudiants` ajoutée au menu admin (`Header.jsx`). Backend `/api/search/students` acceptait déjà `("company","admin")`. Search par `name`, `first_name`, `last_name` reste effective.
+- ✅ Tests `/app/test_reports/iteration_21.json` (100 % backend + frontend).
+
+
 ## Iteration 20 (2026-02-28) — Phase R : Recherche fine + Split server.py (Phase 2)
 - ✅ **Recherche étudiant flexible** : `/api/search/students` `q` cherche désormais dans `name`, `profile.first_name`, `profile.last_name` (l'entreprise peut taper le prénom ou le nom seul).
 - ✅ **Recherche d'offres par entreprise précise** : la saisie « Entreprise précise » sur OffersPage déclenche désormais aussi un appel à `/api/francetravail/search?q=<nom>` (avec post-filtre client côté nom d'entreprise, accents-insensible). Permet par exemple de trouver les offres « Sofratom » au-delà des sources internes. `/api/offers` `q` cherche aussi dans `company_name`.
