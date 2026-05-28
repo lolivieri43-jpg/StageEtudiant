@@ -414,31 +414,11 @@ async def seed(force: bool = False):
 async def root():
     return {"name": "StageEtudiant API", "status": "ok"}
 
-# ============ DEALS / BONS PLANS + MONETIZATION ============
-try:
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
-    STRIPE_AVAILABLE = True
-except ImportError:
-    STRIPE_AVAILABLE = False
-
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
-
-# Fixed price packages (defined server-side ONLY for security)
-PACKAGES = {
-    "sub_monthly": {"amount": 1.00, "currency": "eur", "kind": "subscription", "period": "monthly", "days": 30},
-    "sub_yearly": {"amount": 10.00, "currency": "eur", "kind": "subscription", "period": "yearly", "days": 365},
-    "boost_student": {"amount": 1.00, "currency": "eur", "kind": "boost", "actor": "candidate", "days": 7},
-    "boost_company": {"amount": 10.00, "currency": "eur", "kind": "boost", "actor": "company", "days": 7},
-}
-
+# ============ DEALS / BONS PLANS + MONETIZATION — moved to routes/payments.py + routes/deals.py ============
 DealStatus = Literal["draft", "pending", "published", "refused", "suspended", "expired"]
 
-class CheckoutIn(BaseModel):
-    package_id: str
-    origin_url: str
-    deal_id: Optional[str] = None  # required for boosts
-
 async def company_subscription_active(company_id: str) -> bool:
+    """Helper kept here because routes/deals.py and ads_routes.py both depend on it."""
     sub = await db.subscriptions.find_one({"company_id": company_id, "status": "active"}, {"_id": 0})
     if not sub:
         return False
@@ -452,433 +432,42 @@ async def company_subscription_active(company_id: str) -> bool:
         return False
     return True
 
-# ============ DEALS — moved to routes/deals.py ============
-
-# Subscription status
-@api.get("/subscriptions/me")
-async def my_subscription(user=Depends(get_current_user)):
-    sub = await db.subscriptions.find_one({"company_id": user["user_id"], "status": "active"}, {"_id": 0})
-    if sub and sub.get("end_date"):
-        end = sub["end_date"]
-        if isinstance(end, str):
-            end_dt = datetime.fromisoformat(end)
-            if end_dt.tzinfo is None: end_dt = end_dt.replace(tzinfo=timezone.utc)
-            if end_dt < datetime.now(timezone.utc):
-                await db.subscriptions.update_one({"sub_id": sub["sub_id"]}, {"$set": {"status": "expired"}})
-                sub["status"] = "expired"
-    history = await db.payment_transactions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
-    return {"subscription": sub, "history": history}
-
-@api.post("/subscriptions/cancel")
-async def cancel_sub(user=Depends(get_current_user)):
-    sub = await db.subscriptions.find_one({"company_id": user["user_id"], "status": "active"})
-    if not sub:
-        raise HTTPException(404, "Aucun abonnement actif")
-    await db.subscriptions.update_one({"sub_id": sub["sub_id"]}, {"$set": {"status": "canceled"}})
-    return {"ok": True}
-
-# ============ PAYMENTS (Stripe Checkout) ============
-@api.post("/payments/checkout")
-async def create_checkout(body: CheckoutIn, request: Request, user=Depends(get_current_user)):
-    if not STRIPE_AVAILABLE:
-        raise HTTPException(500, "Module de paiement indisponible")
-    pkg = PACKAGES.get(body.package_id)
-    if not pkg:
-        raise HTTPException(400, "Package invalide")
-    if pkg["kind"] == "subscription" and user["role"] != "company":
-        raise HTTPException(403, "Réservé aux entreprises")
-    if pkg["kind"] == "boost":
-        if not body.deal_id:
-            raise HTTPException(400, "deal_id requis")
-        deal = await db.deals.find_one({"deal_id": body.deal_id}, {"_id": 0})
-        if not deal:
-            raise HTTPException(404, "Bon plan introuvable")
-        if deal["author_id"] != user["user_id"]:
-            raise HTTPException(403, "Pas votre bon plan")
-        if pkg["actor"] == "candidate" and user["role"] != "candidate":
-            raise HTTPException(403, "Boost étudiant réservé aux étudiants")
-        if pkg["actor"] == "company" and user["role"] != "company":
-            raise HTTPException(403, "Boost entreprise réservé aux entreprises")
-    host_url = str(request.base_url).rstrip("/")
-    webhook_url = f"{host_url}/api/webhook/stripe"
-    stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    origin = body.origin_url.rstrip("/")
-    success_url = f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin}/payment/cancel"
-    metadata = {
-        "package_id": body.package_id,
-        "user_id": user["user_id"],
-        "user_role": user["role"],
-        "kind": pkg["kind"],
-    }
-    if body.deal_id:
-        metadata["deal_id"] = body.deal_id
-    req = CheckoutSessionRequest(amount=pkg["amount"], currency=pkg["currency"], success_url=success_url, cancel_url=cancel_url, metadata=metadata)
-    session = await stripe_co.create_checkout_session(req)
-    await db.payment_transactions.insert_one({
-        "tx_id": f"tx_{uuid.uuid4().hex[:12]}",
-        "session_id": session.session_id,
-        "user_id": user["user_id"],
-        "user_role": user["role"],
-        "package_id": body.package_id,
-        "amount": pkg["amount"],
-        "currency": pkg["currency"],
-        "kind": pkg["kind"],
-        "deal_id": body.deal_id,
-        "metadata": metadata,
-        "payment_status": "pending",
-        "status": "initiated",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    return {"url": session.url, "session_id": session.session_id}
-
-async def fulfill_transaction(tx: dict):
-    """Apply business effect once payment is confirmed (idempotent)."""
-    if tx.get("fulfilled"):
-        return
-    pkg_id = tx["package_id"]
-    pkg = PACKAGES.get(pkg_id, {})
-    now = datetime.now(timezone.utc)
-    if pkg.get("kind") == "subscription":
-        end = now + timedelta(days=pkg["days"])
-        await db.subscriptions.update_many({"company_id": tx["user_id"], "status": "active"}, {"$set": {"status": "renewed"}})
-        await db.subscriptions.insert_one({
-            "sub_id": f"sub_{uuid.uuid4().hex[:12]}",
-            "company_id": tx["user_id"],
-            "plan_type": pkg_id,
-            "period": pkg["period"],
-            "price": pkg["amount"],
-            "status": "active",
-            "start_date": now.isoformat(),
-            "end_date": end.isoformat(),
-            "renewal_date": end.isoformat(),
-            "stripe_session_id": tx["session_id"],
-            "created_at": now.isoformat(),
-        })
-    elif pkg.get("kind") == "boost":
-        end = now + timedelta(days=pkg["days"])
-        boost_field = "sponsored_until" if pkg["actor"] == "company" else "boosted_until"
-        if tx.get("deal_id"):
-            await db.deals.update_one({"deal_id": tx["deal_id"]}, {"$set": {boost_field: end.isoformat()}})
-        await db.boost_orders.insert_one({
-            "boost_id": f"boost_{uuid.uuid4().hex[:12]}",
-            "user_id": tx["user_id"],
-            "user_type": tx["user_role"],
-            "deal_id": tx.get("deal_id"),
-            "boost_type": "sponsored" if pkg["actor"] == "company" else "highlight",
-            "price": pkg["amount"],
-            "duration_days": pkg["days"],
-            "start_date": now.isoformat(),
-            "end_date": end.isoformat(),
-            "status": "active",
-            "session_id": tx["session_id"],
-            "created_at": now.isoformat(),
-        })
-    await db.payment_transactions.update_one({"tx_id": tx["tx_id"]}, {"$set": {"fulfilled": True}})
-    await db.revenue_logs.insert_one({
-        "log_id": f"rev_{uuid.uuid4().hex[:10]}",
-        "amount": tx["amount"],
-        "currency": tx["currency"],
-        "kind": tx["kind"],
-        "user_id": tx["user_id"],
-        "package_id": pkg_id,
-        "at": now.isoformat(),
-    })
-
-@api.get("/payments/status/{session_id}")
-async def payment_status(session_id: str, request: Request):
-    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
-    if not tx:
-        raise HTTPException(404, "Transaction introuvable")
-    if tx.get("payment_status") == "paid":
-        return tx
-    if not STRIPE_AVAILABLE:
-        raise HTTPException(500, "Stripe indisponible")
-    host_url = str(request.base_url).rstrip("/")
-    stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
-    try:
-        res = await stripe_co.get_checkout_status(session_id)
-    except Exception as e:
-        logger.warning(f"Stripe status fetch failed for {session_id}: {e}")
-        return tx
-    new_status = res.payment_status
-    upd = {"payment_status": new_status, "status": res.status}
-    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": upd})
-    tx.update(upd)
-    if new_status == "paid":
-        await fulfill_transaction(tx)
-    return tx
-
-@api.post("/webhook/stripe")
-async def stripe_webhook(request: Request):
-    if not STRIPE_AVAILABLE:
-        return {"ok": False}
-    body = await request.body()
-    sig = request.headers.get("Stripe-Signature")
-    host_url = str(request.base_url).rstrip("/")
-    stripe_co = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
-    try:
-        evt = await stripe_co.handle_webhook(body, sig)
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return {"ok": False}
-    if evt.payment_status == "paid":
-        tx = await db.payment_transactions.find_one({"session_id": evt.session_id}, {"_id": 0})
-        if tx and not tx.get("fulfilled"):
-            await db.payment_transactions.update_one({"session_id": evt.session_id}, {"$set": {"payment_status": "paid", "status": "complete"}})
-            tx["payment_status"] = "paid"
-            await fulfill_transaction(tx)
-    return {"ok": True}
-
-# Admin monetization
-@api.get("/admin/monetization")
-async def admin_monetization(user=Depends(get_current_user)):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Admin")
-    active_subs = await db.subscriptions.find({"status": "active"}, {"_id": 0}).to_list(500)
-    monthly = sum(1 for s in active_subs if s.get("period") == "monthly")
-    yearly = sum(1 for s in active_subs if s.get("period") == "yearly")
-    revenue = await db.revenue_logs.find({}, {"_id": 0}).to_list(2000)
-    total = sum(r["amount"] for r in revenue)
-    boost_student_rev = sum(r["amount"] for r in revenue if r["package_id"] == "boost_student")
-    boost_company_rev = sum(r["amount"] for r in revenue if r["package_id"] == "boost_company")
-    sub_rev = sum(r["amount"] for r in revenue if r["kind"] == "subscription")
-    failed = await db.payment_transactions.count_documents({"payment_status": {"$in": ["failed", "expired"]}})
-    canceled = await db.subscriptions.count_documents({"status": "canceled"})
-    transactions = await db.payment_transactions.find({}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
-    return {
-        "active_subs": len(active_subs),
-        "monthly_subs": monthly,
-        "yearly_subs": yearly,
-        "total_revenue": total,
-        "subscription_revenue": sub_rev,
-        "boost_student_revenue": boost_student_rev,
-        "boost_company_revenue": boost_company_rev,
-        "failed_payments": failed,
-        "canceled_subs": canceled,
-        "transactions": transactions,
-    }
-
-
-
-# ============ EXTENSIONS v3: STORAGE, MULTI-SOURCE OFFERS, DOCS, GALLERY, SEARCH ============
+from routes.payments import register_payments_routes
+register_payments_routes(api, db, get_current_user)
+# Re-import the fastapi helpers consumed below (avatar/banner upload endpoints).
 from fastapi import UploadFile, File, Query, Header, Response as FResponse
-import io
 
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+
+# ============ STORAGE / UPLOAD — moved to routes/storage.py ============
+from routes.storage import register_storage_routes
+register_storage_routes(api, db, get_current_user)
+put_object = register_storage_routes.put_object  # back-compat for avatar/banner helpers below
+init_storage = register_storage_routes.init_storage
 APP_NAME = os.environ.get("APP_NAME", "stagiaireconnect")
-_storage_key = None
 
-def init_storage():
-    global _storage_key
-    if _storage_key:
-        return _storage_key
-    if not EMERGENT_KEY:
-        raise HTTPException(500, "Storage non configuré")
-    r = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    r.raise_for_status()
-    _storage_key = r.json()["storage_key"]
-    return _storage_key
 
-def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    r = requests.put(f"{STORAGE_URL}/objects/{path}",
-                     headers={"X-Storage-Key": key, "Content-Type": content_type},
-                     data=data, timeout=120)
-    r.raise_for_status()
-    return r.json()
+# ============ STUDENT DOCUMENTS — moved to routes/documents.py ============
+from routes.documents import register_documents_routes
+register_documents_routes(api, db, get_current_user, get_optional_user)
 
-def get_object(path: str):
-    key = init_storage()
-    r = requests.get(f"{STORAGE_URL}/objects/{path}",
-                     headers={"X-Storage-Key": key}, timeout=60)
-    r.raise_for_status()
-    return r.content, r.headers.get("Content-Type", "application/octet-stream")
 
-MIME = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
-        "webp": "image/webp", "pdf": "application/pdf",
-        "mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
-        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+# ============ COMPANY GALLERY — moved to routes/gallery.py ============
+from routes.gallery import register_gallery_routes
+register_gallery_routes(api, db, get_current_user)
 
-# Max sizes per file kind (bytes)
-MAX_BYTES = {
-    "image/jpeg": 8 * 1024 * 1024,
-    "image/png": 8 * 1024 * 1024,
-    "image/gif": 8 * 1024 * 1024,
-    "image/webp": 8 * 1024 * 1024,
-    "application/pdf": 15 * 1024 * 1024,
-    "video/mp4": 50 * 1024 * 1024,
-    "video/webm": 50 * 1024 * 1024,
-    "video/quicktime": 50 * 1024 * 1024,
-}
-DEFAULT_MAX_BYTES = 10 * 1024 * 1024
+# ============ GEOCODING + CITIES + /offers-nearby — moved to routes/geocoding.py ============
+from routes.geocoding import register_geocoding_routes
+register_geocoding_routes(api, db, _enrich_offers_with_premium)
+get_coords = register_geocoding_routes.get_coords  # back-compat alias
+get_coords_async = register_geocoding_routes.get_coords_async
+haversine = register_geocoding_routes.haversine
+from routes.geocoding import CITY_COORDS
 
-@api.post("/upload")
-async def upload_file(file: UploadFile = File(...), kind: str = "doc", user=Depends(get_current_user)):
-    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin").lower()
-    if ext not in MIME:
-        raise HTTPException(400, f"Type non supporté: {ext}")
-    file_id = uuid.uuid4().hex
-    path = f"{APP_NAME}/{user['user_id']}/{file_id}.{ext}"
-    data = await file.read()
-    limit = MAX_BYTES.get(MIME[ext], DEFAULT_MAX_BYTES)
-    if len(data) > limit:
-        raise HTTPException(400, f"Fichier trop volumineux (max {limit // (1024*1024)} Mo)")
-    result = put_object(path, data, MIME[ext])
-    doc = {
-        "file_id": file_id,
-        "user_id": user["user_id"],
-        "storage_path": result["path"],
-        "filename": file.filename,
-        "content_type": MIME[ext],
-        "size": result.get("size", len(data)),
-        "kind": kind,
-        "is_deleted": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.files.insert_one(doc)
-    doc.pop("_id", None)
-    # Build a download URL the frontend can use
-    backend_origin = os.environ.get("BACKEND_PUBLIC_URL", "")
-    doc["url"] = f"/api/files/{file_id}"
-    return doc
+# ============ SEARCH STUDENTS / students-nearby — moved to routes/students_search.py ============
+from routes.students_search import register_students_search_routes
+register_students_search_routes(api, db, get_current_user, get_coords_async, haversine, get_coords)
 
-@api.get("/files/{file_id}")
-async def download_file(file_id: str, request: Request, auth: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
-    rec = await db.files.find_one({"file_id": file_id, "is_deleted": False}, {"_id": 0})
-    if not rec:
-        raise HTTPException(404, "Fichier introuvable")
-    # Avatars, banners, post media, ad media, deal images are PUBLIC (loaded from <img> without auth)
-    if rec.get("kind") in ("avatar", "banner", "post", "ad", "deal", "feed"):
-        data, ct = get_object(rec["storage_path"])
-        return FResponse(content=data, media_type=rec.get("content_type", ct))
-    # Find document/photo reference if any
-    student_doc = await db.student_documents.find_one({"file_id": file_id}, {"_id": 0})
-    gallery_photo = await db.company_photos.find_one({"file_id": file_id}, {"_id": 0})
-    # Gallery photos are public by default
-    if gallery_photo:
-        data, ct = get_object(rec["storage_path"])
-        return FResponse(content=data, media_type=rec.get("content_type", ct))
-    # For documents with visibility, validate access
-    if student_doc:
-        owner_id = student_doc["user_id"]
-        visibility = student_doc.get("visibility", "after_application")
-        if visibility == "public":
-            data, ct = get_object(rec["storage_path"])
-            return FResponse(content=data, media_type=rec.get("content_type", ct))
-        # Need authenticated caller
-        try:
-            req_user = await get_current_user(request)
-        except HTTPException:
-            raise HTTPException(401, "Authentification requise pour ce document")
-        if req_user["user_id"] == owner_id:
-            data, ct = get_object(rec["storage_path"])
-            return FResponse(content=data, media_type=rec.get("content_type", ct))
-        if visibility == "connected":
-            has_contact = await db.contacts.find_one({"$or": [
-                {"user_a": owner_id, "user_b": req_user["user_id"]},
-                {"user_a": req_user["user_id"], "user_b": owner_id},
-            ]})
-            if not has_contact:
-                raise HTTPException(403, "Document réservé aux contacts")
-        elif visibility == "after_application":
-            ap = await db.applications.find_one({"candidate_id": owner_id, "company_id": req_user["user_id"]})
-            if not ap:
-                raise HTTPException(403, "Document accessible après candidature")
-        else:  # private
-            raise HTTPException(403, "Document privé")
-        data, ct = get_object(rec["storage_path"])
-        return FResponse(content=data, media_type=rec.get("content_type", ct))
-    # No reference: only file owner can download
-    try:
-        req_user = await get_current_user(request)
-        if req_user["user_id"] != rec["user_id"]:
-            raise HTTPException(403, "Accès refusé")
-    except HTTPException:
-        raise HTTPException(401, "Authentification requise")
-    data, ct = get_object(rec["storage_path"])
-    return FResponse(content=data, media_type=rec.get("content_type", ct))
 
-# ============ STUDENT DOCUMENTS ============
-@api.post("/me/documents")
-async def add_doc(body: dict, user=Depends(get_current_user)):
-    """Register a document (file_id from /upload) under student's profile."""
-    if user["role"] != "candidate":
-        raise HTTPException(403, "Étudiants uniquement")
-    doc_id = f"d_{uuid.uuid4().hex[:10]}"
-    entry = {
-        "doc_id": doc_id,
-        "user_id": user["user_id"],
-        "file_id": body.get("file_id"),
-        "filename": body.get("filename", "document"),
-        "doc_type": body.get("doc_type", "cv"),  # cv, lettre, convention, portfolio, autre
-        "visibility": body.get("visibility", "after_application"),  # private, connected, after_application, public
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.student_documents.insert_one(entry)
-    entry.pop("_id", None)
-    return entry
-
-@api.get("/users/{user_id}/documents")
-async def list_user_documents(user_id: str, requester=Depends(get_optional_user)):
-    docs = await db.student_documents.find({"user_id": user_id}, {"_id": 0}).to_list(50)
-    if requester and requester["user_id"] == user_id:
-        return docs  # owner sees all
-    # Determine accessible docs
-    out = []
-    has_contact = False
-    has_app = False
-    if requester:
-        ct = await db.contacts.find_one({"$or": [
-            {"user_a": user_id, "user_b": requester["user_id"]},
-            {"user_a": requester["user_id"], "user_b": user_id},
-        ]})
-        has_contact = bool(ct)
-        ap = await db.applications.find_one({"candidate_id": user_id, "company_id": requester["user_id"]})
-        has_app = bool(ap)
-    for d in docs:
-        v = d.get("visibility", "after_application")
-        ok = v == "public" or (v == "connected" and has_contact) or (v == "after_application" and has_app)
-        if ok:
-            out.append(d)
-    return out
-
-@api.delete("/me/documents/{doc_id}")
-async def delete_doc(doc_id: str, user=Depends(get_current_user)):
-    await db.student_documents.delete_one({"doc_id": doc_id, "user_id": user["user_id"]})
-    return {"ok": True}
-
-# ============ COMPANY GALLERY ============
-@api.post("/me/gallery")
-async def add_photo(body: dict, user=Depends(get_current_user)):
-    if user["role"] != "company":
-        raise HTTPException(403, "Entreprises uniquement")
-    pid = f"p_{uuid.uuid4().hex[:10]}"
-    entry = {
-        "photo_id": pid,
-        "user_id": user["user_id"],
-        "file_id": body.get("file_id"),
-        "url": body.get("url"),  # accepts direct URL too
-        "title": body.get("title", "Photo"),
-        "is_hidden": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.company_photos.insert_one(entry)
-    entry.pop("_id", None)
-    return entry
-
-@api.get("/users/{user_id}/gallery")
-async def get_gallery(user_id: str):
-    photos = await db.company_photos.find({"user_id": user_id, "is_hidden": {"$ne": True}}, {"_id": 0}).to_list(100)
-    return photos
-
-@api.delete("/me/gallery/{photo_id}")
-async def remove_photo(photo_id: str, user=Depends(get_current_user)):
-    await db.company_photos.delete_one({"photo_id": photo_id, "user_id": user["user_id"]})
-    return {"ok": True}
 
 # ============ EXTENDED OFFERS: source filter ============
 @api.get("/offer-sources")
@@ -901,6 +490,15 @@ async def list_sources():
             {"id": "La Bonne Alternance", "label": "La Bonne Alternance", "internal": False, "official": True},
         ]
     }
+
+
+# ============ SAVED OFFERS ============
+
+# ============ DEALS — moved to routes/deals.py ============
+
+
+
+
 
 # ============ SAVED OFFERS ============
 @api.post("/saved-offers/{offer_id}")
@@ -974,41 +572,6 @@ async def set_application_status(app_id: str, body: dict, user=Depends(get_curre
     await notify(a["candidate_id"], "application_status", f"Votre candidature \"{a['offer_title']}\" est maintenant: {status}", "/dashboard")
     return {"ok": True}
 
-# ============ SEARCH STUDENTS (by companies) ============
-@api.get("/search/students")
-async def search_students(
-    q: Optional[str] = None,
-    level: Optional[str] = None,
-    domain: Optional[str] = None,
-    city: Optional[str] = None,
-    region: Optional[str] = None,
-    contract_type: Optional[str] = None,
-    student_status: Optional[str] = None,
-    skill: Optional[str] = None,
-    limit: int = 50,
-    user=Depends(get_current_user),
-):
-    if user["role"] not in ("company", "admin"):
-        raise HTTPException(403, "Réservé aux entreprises")
-    query = {"role": "candidate"}
-    if q:
-        # Search across full name, first_name and last_name (accent + case insensitive)
-        # Mongo regex doesn't strip diacritics; client-side already normalizes via the UI.
-        import re as _re
-        rx = {"$regex": _re.escape(q), "$options": "i"}
-        query["$or"] = [
-            {"name": rx},
-            {"profile.first_name": rx},
-            {"profile.last_name": rx},
-        ]
-    if level: query["profile.level"] = level
-    if domain: query["profile.domain"] = {"$regex": domain, "$options": "i"}
-    if city: query["profile.city"] = {"$regex": city, "$options": "i"}
-    if region: query["profile.region"] = region
-    if contract_type: query["profile.contract_type"] = contract_type
-    if student_status: query["profile.status"] = student_status
-    if skill: query["profile.skills"] = {"$regex": skill, "$options": "i"}
-    users = await db.users.find(query, {"_id": 0, "password": 0}).limit(limit).to_list(limit)
     return users
 
 # ============ CONTACT EXTENSIONS — moved to routes/contacts.py ============
@@ -1187,95 +750,6 @@ async def seed_v3(force: bool = False):
 
 
 
-# ============ PHASE B: GEOCODING + DISTANCE SEARCH ============
-# Static mapping of major French cities → coordinates (lat, lng)
-CITY_COORDS = {
-    "paris": (48.8566, 2.3522), "marseille": (43.2965, 5.3698), "lyon": (45.7640, 4.8357),
-    "toulouse": (43.6047, 1.4442), "nice": (43.7102, 7.2620), "nantes": (47.2184, -1.5536),
-    "strasbourg": (48.5734, 7.7521), "montpellier": (43.6108, 3.8767), "bordeaux": (44.8378, -0.5792),
-    "lille": (50.6292, 3.0573), "rennes": (48.1173, -1.6778), "reims": (49.2583, 4.0317),
-    "saint-étienne": (45.4397, 4.3872), "toulon": (43.1242, 5.9280), "le havre": (49.4944, 0.1079),
-    "grenoble": (45.1885, 5.7245), "dijon": (47.3220, 5.0415), "angers": (47.4784, -0.5632),
-    "nîmes": (43.8367, 4.3601), "villeurbanne": (45.7720, 4.8902), "saint-denis": (48.9362, 2.3574),
-    "le mans": (48.0061, 0.1996), "aix-en-provence": (43.5297, 5.4474), "clermont-ferrand": (45.7772, 3.0870),
-    "brest": (48.3905, -4.4860), "tours": (47.3941, 0.6848), "amiens": (49.8941, 2.2958),
-    "limoges": (45.8336, 1.2611), "annecy": (45.8992, 6.1294), "perpignan": (42.6886, 2.8948),
-    "boulogne-billancourt": (48.8352, 2.2412), "besançon": (47.2378, 6.0241), "orléans": (47.9029, 1.9039),
-    "metz": (49.1193, 6.1757), "rouen": (49.4432, 1.0993), "mulhouse": (47.7508, 7.3359),
-    "caen": (49.1829, -0.3707), "nancy": (48.6921, 6.1844), "poitiers": (46.5802, 0.3404),
-    "versailles": (48.8049, 2.1204), "la rochelle": (46.1591, -1.1517), "pau": (43.2951, -0.3708),
-    "bourges": (47.0810, 2.3988), "ajaccio": (41.9192, 8.7386), "bastia": (42.7028, 9.4503),
-    "belfort": (47.6379, 6.8628), "quimper": (47.9960, -4.0978), "lorient": (47.7484, -3.3702),
-    "saint-denis (réunion)": (-20.8823, 55.4504), "cannes": (43.5528, 7.0174), "tourcoing": (50.7235, 3.1602),
-    "roubaix": (50.6927, 3.1746), "nanterre": (48.8924, 2.2069),
-}
-
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp/2)**2 + math.cos(p1) * math.cos(p2) * math.sin(dl/2)**2
-    return R * 2 * math.asin(math.sqrt(a))
-
-def get_coords(city: Optional[str]):
-    if not city:
-        return None
-    # 1) legacy small dict
-    legacy = CITY_COORDS.get(city.strip().lower())
-    if legacy:
-        return legacy
-    # 2) FR_CITIES (richer, accent-insensitive)
-    try:
-        from geo_search import geocode_french_city as _gfc
-        c = _gfc(city)
-        if c:
-            return c
-    except Exception:
-        pass
-    return None
-
-
-async def get_coords_async(city: Optional[str], country: str = "France"):
-    """Same as get_coords but falls back to Nominatim/OSM (cached)."""
-    if not city:
-        return None
-    local = get_coords(city)
-    if local:
-        return local
-    try:
-        from geo_search import geocode_nominatim as _gn
-        res = await _gn(db, city, country)
-        if res:
-            return (res[0], res[1])
-    except Exception:
-        pass
-    return None
-
-@api.get("/cities")
-async def list_cities():
-    """Return list of geocodable cities (FR_CITIES from geo_search + legacy CITY_COORDS)."""
-    from geo_search import FR_CITIES
-    all_cities = set([c.title() for c in CITY_COORDS.keys()] + [c.title() for c in FR_CITIES.keys()])
-    all_cities.discard("Europe")
-    return {"cities": sorted(all_cities)}
-
-
-@api.get("/geocode")
-async def geocode_city(city: str, country: str = "France"):
-    """Geocode a city: tries FR_CITIES first, then Nominatim/OSM (30-day cache).
-    Used by frontend for radius search + map features. Always returns 200 with `found` flag."""
-    from geo_search import geocode_french_city, geocode_nominatim
-    local = geocode_french_city(city)
-    if local:
-        return {"found": True, "source": "local", "latitude": local[0], "longitude": local[1],
-                "normalized_city": city.title(), "country": "France"}
-    result = await geocode_nominatim(db, city, country)
-    if not result:
-        return {"found": False, "message": "Ville introuvable, vérifiez l'orthographe ou élargissez la recherche."}
-    lat, lon, meta = result
-    return {"found": True, "source": "nominatim", "latitude": lat, "longitude": lon, **meta}
-
 
 # ============ OFFICIAL PLATFORM PROFILE (StageEtudiant.com) ============
 RESERVED_NAMES = {"stageetudiant", "stageetudiant.com", "stagiaireconnect",
@@ -1365,53 +839,6 @@ async def user_premium_status(user_id: str):
 
 
 
-@api.get("/offers-nearby")
-async def offers_nearby(city: str, distance_km: float = 50, limit: int = 200,
-                        contract_type: Optional[str] = None, source: Optional[str] = None):
-    coords = await get_coords_async(city)
-    if not coords:
-        raise HTTPException(404, f"Ville introuvable: {city}. Vérifiez l'orthographe ou élargissez la recherche.")
-    lat0, lon0 = coords
-    query = {}
-    if contract_type: query["contract_type"] = contract_type
-    if source: query["source"] = source
-    offers = await db.offers.find(query, {"_id": 0}).to_list(2000)
-    result = []
-    for o in offers:
-        oc = get_coords(o.get("city"))
-        if not oc:
-            continue
-        d = haversine(lat0, lon0, oc[0], oc[1])
-        if d <= distance_km:
-            o["distance_km"] = round(d, 1)
-            result.append(o)
-    result.sort(key=lambda x: x["distance_km"])
-    result = result[:limit]
-    await _enrich_offers_with_premium(result)
-    return result
-
-
-@api.get("/search/students-nearby")
-async def students_nearby(city: str, distance_km: float = 50, limit: int = 100,
-                          user=Depends(get_current_user)):
-    if user["role"] not in ("company", "admin"):
-        raise HTTPException(403, "Réservé aux entreprises")
-    coords = await get_coords_async(city)
-    if not coords:
-        raise HTTPException(404, f"Ville introuvable: {city}. Vérifiez l'orthographe.")
-    lat0, lon0 = coords
-    students = await db.users.find({"role": "candidate"}, {"_id": 0, "password": 0}).to_list(2000)
-    result = []
-    for s in students:
-        sc = get_coords(s.get("profile", {}).get("city"))
-        if not sc:
-            continue
-        d = haversine(lat0, lon0, sc[0], sc[1])
-        if d <= distance_km:
-            s["distance_km"] = round(d, 1)
-            result.append(s)
-    result.sort(key=lambda x: x["distance_km"])
-    return result[:limit]
 
 # ============ PHASE B: WEBSOCKET REAL-TIME MESSAGING ============
 class ConnectionManager:
