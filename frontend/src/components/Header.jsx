@@ -128,6 +128,7 @@ export default function Header() {
                 {user.role === "candidate" && <DropdownMenuItem onClick={() => navigate("/cv")} data-testid="menu-my-cv">Mon CV en ligne</DropdownMenuItem>}
                 <DropdownMenuItem onClick={() => navigate("/history")} data-testid="menu-history">Mon historique</DropdownMenuItem>
                 {user.role === "company" && <DropdownMenuItem onClick={() => navigate("/search/students")} data-testid="menu-search-students">Rechercher des étudiants</DropdownMenuItem>}
+                {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/search/students")} data-testid="menu-search-students-admin">Rechercher des étudiants</DropdownMenuItem>}
                 <DropdownMenuItem onClick={() => navigate("/settings")} data-testid="menu-settings">Paramètres</DropdownMenuItem>
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin")} data-testid="menu-admin">Administration</DropdownMenuItem>}
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/monetization")} data-testid="menu-monetization">Monétisation</DropdownMenuItem>}

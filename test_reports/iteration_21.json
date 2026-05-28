@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 21 — Both reported bugs FIXED & verified. (1) Offers company filter now uses accent-insensitive SUBSTRING match for 3+ char terms (whole-word fallback for ≤2): GET /api/offers?company=Beta returns 3 (BetaSystems081 Assistant Comptable + BetaSystems081 Éducateur + BetaTech065 Technicien) — visually confirmed on /offers?company=Beta. (2) Admin can now use /search/students: backend already accepted admin role; UI gate on SearchStudentsPage.jsx:67 now allows role∈{company,admin}; new Header entry data-testid=menu-search-students-admin added. Backend 12/12 passed (1 skipped: no posted_by field on offers — unrelated). Frontend: admin (bernardolivieri1326@gmail.com) → /search/students renders full form, search 'Lucas' → '1 profil trouvé' + Lucas Martin card. Company (hr@technova.fr) regression: search 'Martin' still returns Lucas Martin. Iter20 regression OK: /auth/login, /auth/me, /admin/stats, /offers/regions, /users/{id} all 200.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter21_search_fixes.py",
+    "/app/test_reports/pytest/pytest_iter21.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "geo_search.company_contains_term threshold len(norm_term) <= 2 is reasonable but documented only in code comments. Add a short README/docstring example: 'Beta' → substring (matches BetaSystems081, BetaTech065), 'sa' → whole-word (avoids matching every 'SAS' suffix), 'a' → whole-word (avoids matching everything).",
+    "SearchStudentsPage.jsx line 67 ternary `user?.role !== 'company' && user?.role !== 'admin'` works but a positive allowlist `!['company','admin'].includes(user?.role)` is more maintainable when more roles are added later (e.g. 'school' or 'recruiter').",
+    "Header.jsx lines 130-131 duplicate the same menu entry for company & admin with two different data-testids. Consider a single conditional `{(user.role==='company'||user.role==='admin') && <DropdownMenuItem … data-testid={user.role==='admin'?'menu-search-students-admin':'menu-search-students'}>` to avoid duplication.",
+    "Backend: routes/offers.py /api/offers?company=… now triggers substring search → make sure the same logic flows into /api/external-offers/all and /api/francetravail/search (confirmed via tests, all return 0 for 'Sofratom') — good consistency.",
+    "server.py is STILL 3543 lines (unchanged since iter20). The /search/* endpoints, /seed-v3, and geocoding glue remain candidates for extraction. Carrying-over comment from iter20."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter21_search_fixes.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin bernardolivieri1326@gmail.com / OwnerAdmin2026! ✓, Company hr@technova.fr / Demo1234! ✓ — both working per /app/memory/test_credentials.md",
+  "seed_data_creation": "None. Tests use pre-seeded users + offers (BetaSystems081 x2, BetaTech065, BrightStudio011).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both targeted iter21 bugs are fully verified. Backend search test pattern: GET /api/offers?company=<term> → if len(term)>=3 substring match (accent-insensitive), else whole-word. /api/external-offers/all + /api/francetravail/search use the same helper so they all consistently return 0 for non-existent companies. Admin role now allowed on SearchStudentsPage — UI gate is at line 67. Header menu entry data-testid=menu-search-students-admin lives at line 131 (Radix DropdownMenu portal — when probing via Playwright, prefer await page.get_by_test_id('menu-search-students-admin') after explicitly opening the trigger; query_selector on portal'd content may miss it). Iter21 backend test file at /app/backend/tests/test_iter21_search_fixes.py is auto-loading REACT_APP_BACKEND_URL from /app/frontend/.env if env var absent — same safe pattern as iter20. The previously-skipped users-public-profile test is because seeded offers do not carry a posted_by/company_user_id field at the top level (companies have their own /companies endpoint); not a regression.",
+  "rca of the issue": "Original RCA was correct and the fixes target it precisely: (1) Before iter21, company_contains_term required regex \\b<term>\\b which means 'Beta' would only match a token boundary — 'BetaSystems081' has no boundary between 'Beta' and 'Systems', so it was excluded. New behavior: for 3+ chars do plain `norm_term in norm_name`, keeping whole-word ONLY for ≤2 chars to avoid matching 'sa' against everything. Verified: 'Beta'→3 matches, 'Bright'→1 match, 'BetaSystems081'→2 matches, 'a'→0, 'Sofratom'→0 (internal+external+FT). (2) SearchStudentsPage previously rejected admin role on the client (server already accepted it) — line 67 now includes 'admin'. Header gained a parallel menu item with a distinct data-testid for discoverability. Verified end-to-end: admin login → /search/students → 'Lucas' → Lucas Martin card."
+}

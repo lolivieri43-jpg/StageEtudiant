@@ -39,14 +39,19 @@ def companies_match(a: Optional[str], b: Optional[str]) -> bool:
 
 
 def company_contains_term(name: Optional[str], term: Optional[str]) -> bool:
-    """For autocomplete-style match: term must appear as a whole word inside name."""
+    """Loose match: term must appear inside name (substring, accent-insensitive).
+    Falls back to whole-word match if substring is too short (<=2 chars) to avoid noise."""
     if not name or not term:
         return False
     norm_name = normalize_text(name)
     norm_term = normalize_text(term)
     if not norm_term:
         return False
-    return re.search(rf"\b{re.escape(norm_term)}\b", norm_name) is not None
+    if len(norm_term) <= 2:
+        # very short terms: require whole-word match to limit noise (e.g. "sa", "fr")
+        return re.search(rf"\b{re.escape(norm_term)}\b", norm_name) is not None
+    # 3+ chars: simple substring match — handles "Beta" in "BetaSystems081" and "Sof" in "Sofratom"
+    return norm_term in norm_name
 
 
 # ---------- Haversine ----------

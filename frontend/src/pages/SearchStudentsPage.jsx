@@ -64,7 +64,7 @@ export default function SearchStudentsPage() {
     } catch (err) { toast.error(err.response?.data?.detail || "Erreur"); }
   };
 
-  if (user?.role !== "company") return <div className="pt-24 text-center text-slate-500">Réservé aux entreprises</div>;
+  if (user?.role !== "company" && user?.role !== "admin") return <div className="pt-24 text-center text-slate-500">Réservé aux entreprises</div>;
 
   return (
     <div className="min-h-screen pt-20 pb-12 bg-slate-50 dark:bg-slate-900">
