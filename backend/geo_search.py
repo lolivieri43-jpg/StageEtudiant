@@ -210,6 +210,124 @@ def geocode_french_city(city: Optional[str]) -> Optional[Tuple[float, float]]:
     return None
 
 
+async def geocode_nominatim(db, city: str, country: str = "France") -> Optional[Tuple[float, float, dict]]:
+    """Geocode via Nominatim/OSM with 30-day Mongo cache.
+    Returns (lat, lon, meta) or None. Meta includes normalized_city, postal_code, department, region, country_code.
+    Always sets a custom User-Agent + respects 1 req/s usage limits (cached entries skip the network call).
+    """
+    if not city:
+        return None
+    import asyncio as _asyncio
+    import time as _time
+    from datetime import datetime, timezone, timedelta
+    import requests as _rq
+
+    query = f"{city}, {country}" if country and country.lower() not in city.lower() else city
+    query_key = query.lower().strip()
+
+    # 1) Cache check
+    cache = await db.geocoding_cache.find_one({"query": query_key}, {"_id": 0})
+    if cache:
+        try:
+            exp = datetime.fromisoformat(cache["expires_at"])
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp > datetime.now(timezone.utc):
+                if cache.get("latitude") and cache.get("longitude"):
+                    return float(cache["latitude"]), float(cache["longitude"]), {
+                        "normalized_city": cache.get("normalized_city"),
+                        "postal_code": cache.get("postal_code"),
+                        "department": cache.get("department"),
+                        "region": cache.get("region"),
+                        "country": cache.get("country"),
+                        "country_code": cache.get("country_code"),
+                    }
+                return None  # cached negative
+        except Exception:
+            pass
+
+    # 2) Call Nominatim
+    started = _time.monotonic()
+    error_message = None
+    status = "ok"
+    try:
+        def _call():
+            return _rq.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": query, "format": "json", "addressdetails": 1, "limit": 1},
+                headers={
+                    "User-Agent": "StageEtudiant.com/1.0 (contact@stageetudiant.com)",
+                    "Accept-Language": "fr,en",
+                },
+                timeout=8,
+            )
+        r = await _asyncio.to_thread(_call)
+        if r.status_code != 200:
+            status = f"http_{r.status_code}"
+            error_message = r.text[:200]
+            data = []
+        else:
+            data = r.json()
+    except Exception as e:
+        status = "exception"
+        error_message = str(e)[:200]
+        data = []
+
+    response_time_ms = int((_time.monotonic() - started) * 1000)
+    await db.geocoding_api_logs.insert_one({
+        "provider": "nominatim",
+        "query": query_key,
+        "status": status,
+        "response_time_ms": response_time_ms,
+        "error_message": error_message,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    now = datetime.now(timezone.utc)
+    if not data:
+        # Cache negative result for 7 days
+        await db.geocoding_cache.update_one(
+            {"query": query_key},
+            {"$set": {
+                "query": query_key,
+                "latitude": None, "longitude": None,
+                "source": "nominatim",
+                "created_at": now.isoformat(),
+                "expires_at": (now + timedelta(days=7)).isoformat(),
+            }},
+            upsert=True,
+        )
+        return None
+
+    item = data[0]
+    addr = item.get("address", {}) or {}
+    lat = float(item["lat"])
+    lon = float(item["lon"])
+    normalized_city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality") or city
+    meta = {
+        "normalized_city": normalized_city,
+        "postal_code": addr.get("postcode"),
+        "department": addr.get("county") or addr.get("state_district"),
+        "region": addr.get("state"),
+        "country": addr.get("country"),
+        "country_code": (addr.get("country_code") or "").upper() or None,
+    }
+    await db.geocoding_cache.update_one(
+        {"query": query_key},
+        {"$set": {
+            "query": query_key,
+            "latitude": lat, "longitude": lon,
+            "source": "nominatim",
+            **meta,
+            "raw_payload_json": item,
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(days=30)).isoformat(),
+        }},
+        upsert=True,
+    )
+    return lat, lon, meta
+
+
 def offer_coords(offer: dict) -> Optional[Tuple[float, float]]:
     """Resolve (lat, lon) for an offer from its own fields or by geocoding its city."""
     lat = offer.get("latitude") or offer.get("lat")

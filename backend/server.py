@@ -414,9 +414,15 @@ async def list_offers(
 
     # ---------- Radius filter ----------
     if radius_km and radius_km > 0:
+        from geo_search import geocode_nominatim as _geocode_nominatim
         center = geocode_french_city(city)
         if not center:
-            raise HTTPException(400, "Ville inconnue pour le filtre par rayon. Choisissez une ville française du référentiel.")
+            # Fallback to Nominatim/OSM (with 30-day Mongo cache)
+            fallback = await _geocode_nominatim(db, city or "")
+            if fallback:
+                center = (fallback[0], fallback[1])
+        if not center:
+            raise HTTPException(400, "Ville introuvable, vérifiez l'orthographe ou élargissez la recherche.")
         clat, clon = center
         kept = []
         for o in offers:
@@ -1518,8 +1524,113 @@ async def list_cities():
     """Return list of geocodable cities (FR_CITIES from geo_search + legacy CITY_COORDS)."""
     from geo_search import FR_CITIES
     all_cities = set([c.title() for c in CITY_COORDS.keys()] + [c.title() for c in FR_CITIES.keys()])
-    all_cities.discard("Europe")  # internal fallback
+    all_cities.discard("Europe")
     return {"cities": sorted(all_cities)}
+
+
+@api.get("/geocode")
+async def geocode_city(city: str, country: str = "France"):
+    """Geocode a city: tries FR_CITIES first, then Nominatim/OSM (30-day cache).
+    Used by frontend for radius search + map features. Always returns 200 with `found` flag."""
+    from geo_search import geocode_french_city, geocode_nominatim
+    local = geocode_french_city(city)
+    if local:
+        return {"found": True, "source": "local", "latitude": local[0], "longitude": local[1],
+                "normalized_city": city.title(), "country": "France"}
+    result = await geocode_nominatim(db, city, country)
+    if not result:
+        return {"found": False, "message": "Ville introuvable, vérifiez l'orthographe ou élargissez la recherche."}
+    lat, lon, meta = result
+    return {"found": True, "source": "nominatim", "latitude": lat, "longitude": lon, **meta}
+
+
+# ============ OFFICIAL PLATFORM PROFILE (StageEtudiant.com) ============
+RESERVED_NAMES = {"stageetudiant", "stageetudiant.com", "stagiaireconnect",
+                  "stage-etudiant", "stageetudiantcom", "admin", "support",
+                  "moderation", "stageetudiant officiel"}
+
+
+def _is_reserved_name(name: str) -> bool:
+    from geo_search import normalize_text
+    n = normalize_text(name).replace(" ", "").replace(".", "")
+    return any(n == r.replace(" ", "").replace(".", "") for r in RESERVED_NAMES)
+
+
+@api.get("/official-profile")
+async def get_official_profile():
+    """Public read of the official StageEtudiant.com profile."""
+    doc = await db.official_platform_profile.find_one({"key": "main"}, {"_id": 0})
+    if not doc:
+        # Sensible defaults
+        doc = {
+            "key": "main",
+            "display_name": "StageEtudiant.com",
+            "profile_image_url": None,
+            "banner_image_url": None,
+            "description": "La plateforme française pour trouver son stage ou son alternance.",
+            "slogan": "Centraliser les offres, simplifier la recherche.",
+            "website_url": "https://stageetudiant.com",
+            "contact_email": "contact@stageetudiant.com",
+            "primary_color": "#2563eb",
+            "is_visible": True,
+            "is_official": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    return doc
+
+
+@api.patch("/admin/official-profile")
+async def update_official_profile(data: dict, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin")
+    allowed = {"display_name", "profile_image_url", "banner_image_url",
+               "description", "slogan", "website_url", "contact_email",
+               "primary_color", "is_visible"}
+    upd = {k: v for k, v in (data or {}).items() if k in allowed}
+    upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    upd["is_official"] = True
+    await db.official_platform_profile.update_one(
+        {"key": "main"},
+        {"$set": {"key": "main", **upd}},
+        upsert=True,
+    )
+    doc = await db.official_platform_profile.find_one({"key": "main"}, {"_id": 0})
+    return doc
+
+
+# ============ PREMIUM STATUS ============
+def _premium_active_from_doc(u: dict) -> bool:
+    if not u or not u.get("is_premium"):
+        return False
+    if u.get("premium_status") and u["premium_status"] != "active":
+        return False
+    end = u.get("premium_end_date")
+    if end:
+        try:
+            d = datetime.fromisoformat(end) if isinstance(end, str) else end
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            if d < datetime.now(timezone.utc):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+@api.get("/users/{user_id}/premium-status")
+async def user_premium_status(user_id: str):
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password": 0})
+    if not u:
+        raise HTTPException(404, "Introuvable")
+    return {
+        "user_id": user_id,
+        "is_premium": _premium_active_from_doc(u),
+        "premium_status": u.get("premium_status"),
+        "premium_end_date": u.get("premium_end_date"),
+    }
+
+
+
 
 @api.get("/offers-nearby")
 async def offers_nearby(city: str, distance_km: float = 50, limit: int = 200,
@@ -3504,7 +3615,12 @@ async def get_all_external_offers(
 
     # Radius filter (strict — drops offers with no coords)
     if radius_km and radius_km > 0:
+        from geo_search import geocode_nominatim as _geocode_nominatim
         center = geocode_french_city(city)
+        if not center and city:
+            fallback = await _geocode_nominatim(db, city)
+            if fallback:
+                center = (fallback[0], fallback[1])
         if center:
             clat, clon = center
             kept = []
