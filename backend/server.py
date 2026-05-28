@@ -191,6 +191,13 @@ async def register(data: RegisterIn):
     existing = await db.users.find_one({"email": data.email}, {"_id": 0})
     if existing:
         raise HTTPException(400, "Email déjà utilisé")
+    # Forbid reserved names so nobody can usurp the official StageEtudiant identity
+    from geo_search import normalize_text as _norm
+    _name_norm = _norm(data.name).replace(" ", "").replace(".", "")
+    _reserved = {"stageetudiant", "stageetudiantcom", "stageetudiantofficiel",
+                 "stagiaireconnect", "support", "moderation", "admin"}
+    if _name_norm in _reserved:
+        raise HTTPException(400, "Ce nom est réservé à la plateforme. Veuillez en choisir un autre.")
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     profile = {}
     if data.role == "candidate":
@@ -343,6 +350,41 @@ async def create_offer(data: OfferIn, user=Depends(get_current_user)):
     doc.pop("_id", None)
     return doc
 
+async def _enrich_offers_with_premium(offers: list) -> None:
+    """Adds company_is_premium / company_premium_status / company_premium_end_date
+    on each offer (in-place), batched by unique company_id."""
+    if not offers:
+        return
+    ids = {o.get("company_id") for o in offers if o.get("company_id")}
+    if not ids:
+        return
+    cursor = db.users.find(
+        {"user_id": {"$in": list(ids)}, "role": "company"},
+        {"_id": 0, "user_id": 1, "profile.is_premium": 1, "profile.premium_status": 1, "profile.premium_end_date": 1},
+    )
+    premium_by_id: dict = {}
+    async for u in cursor:
+        p = u.get("profile", {}) or {}
+        premium_by_id[u["user_id"]] = {
+            "is_premium": bool(p.get("is_premium")),
+            "premium_status": p.get("premium_status"),
+            "premium_end_date": p.get("premium_end_date"),
+            "active": _premium_active_from_doc({
+                "is_premium": p.get("is_premium"),
+                "premium_status": p.get("premium_status"),
+                "premium_end_date": p.get("premium_end_date"),
+            }),
+        }
+    for o in offers:
+        cid = o.get("company_id")
+        info = premium_by_id.get(cid)
+        if not info:
+            continue
+        o["company_is_premium"] = bool(info["active"])
+        o["company_premium_status"] = info["premium_status"]
+        o["company_premium_end_date"] = info["premium_end_date"]
+
+
 @api.get("/offers")
 async def list_offers(
     q: Optional[str] = None,
@@ -436,7 +478,11 @@ async def list_offers(
                 kept.append(o)
         offers = sorted(kept, key=lambda x: x.get("_distance_km", 9999))
 
-    return offers[: min(limit, 500)]
+    offers = offers[: min(limit, 500)]
+    await _enrich_offers_with_premium(offers)
+    # Premium-first ordering (stable for non-premium)
+    offers.sort(key=lambda o: 0 if o.get("company_is_premium") else 1)
+    return offers
 
 @api.get("/offers/regions")
 async def offers_by_region():
@@ -1517,7 +1563,36 @@ def haversine(lat1, lon1, lat2, lon2):
 def get_coords(city: Optional[str]):
     if not city:
         return None
-    return CITY_COORDS.get(city.strip().lower())
+    # 1) legacy small dict
+    legacy = CITY_COORDS.get(city.strip().lower())
+    if legacy:
+        return legacy
+    # 2) FR_CITIES (richer, accent-insensitive)
+    try:
+        from geo_search import geocode_french_city as _gfc
+        c = _gfc(city)
+        if c:
+            return c
+    except Exception:
+        pass
+    return None
+
+
+async def get_coords_async(city: Optional[str], country: str = "France"):
+    """Same as get_coords but falls back to Nominatim/OSM (cached)."""
+    if not city:
+        return None
+    local = get_coords(city)
+    if local:
+        return local
+    try:
+        from geo_search import geocode_nominatim as _gn
+        res = await _gn(db, city, country)
+        if res:
+            return (res[0], res[1])
+    except Exception:
+        pass
+    return None
 
 @api.get("/cities")
 async def list_cities():
@@ -1635,9 +1710,9 @@ async def user_premium_status(user_id: str):
 @api.get("/offers-nearby")
 async def offers_nearby(city: str, distance_km: float = 50, limit: int = 200,
                         contract_type: Optional[str] = None, source: Optional[str] = None):
-    coords = get_coords(city)
+    coords = await get_coords_async(city)
     if not coords:
-        raise HTTPException(404, f"Ville inconnue: {city}. Utilisez /api/cities pour la liste.")
+        raise HTTPException(404, f"Ville introuvable: {city}. Vérifiez l'orthographe ou élargissez la recherche.")
     lat0, lon0 = coords
     query = {}
     if contract_type: query["contract_type"] = contract_type
@@ -1653,16 +1728,19 @@ async def offers_nearby(city: str, distance_km: float = 50, limit: int = 200,
             o["distance_km"] = round(d, 1)
             result.append(o)
     result.sort(key=lambda x: x["distance_km"])
-    return result[:limit]
+    result = result[:limit]
+    await _enrich_offers_with_premium(result)
+    return result
+
 
 @api.get("/search/students-nearby")
 async def students_nearby(city: str, distance_km: float = 50, limit: int = 100,
                           user=Depends(get_current_user)):
     if user["role"] not in ("company", "admin"):
         raise HTTPException(403, "Réservé aux entreprises")
-    coords = get_coords(city)
+    coords = await get_coords_async(city)
     if not coords:
-        raise HTTPException(404, f"Ville inconnue: {city}")
+        raise HTTPException(404, f"Ville introuvable: {city}. Vérifiez l'orthographe.")
     lat0, lon0 = coords
     students = await db.users.find({"role": "candidate"}, {"_id": 0, "password": 0}).to_list(2000)
     result = []

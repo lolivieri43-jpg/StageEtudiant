@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 19 — Full E2E test of the 5 new features. Backend: 12/12 pytest passed (official profile GET/PATCH + admin gate, reserved-name register check, Nominatim geocoding + cache + unknown city, offers premium enrichment, /offers-nearby fallback). Frontend: /a-propos public page, /admin/official-profile (anon redirect + admin edit-save persistence), /offers Rechercher submit flow (no auto-fetch on typing, URL params update on click, reset works, hint + count visible), header & footer 'À propos' links all verified. PremiumBadge visible on landing-page Stagiaires en vedette (PREMIUM tags rendered).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter19_phaseI.py",
+    "/app/test_reports/pytest/pytest_iter19.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "OffersPage.jsx renders <Sidebar /> twice (mobile + desktop) which creates two DOM elements sharing data-testid='apply-filters-btn', 'reset-filters-btn', 'filter-query', 'filters-hint', 'filters-sidebar'. Visually only one is shown via CSS (lg:hidden/hidden lg:block) so users are unaffected, but Playwright / test scripts must use .last (desktop) or .first (mobile-when-active). Consider conditional rendering or differentiating testids to avoid future test ambiguity.",
+    "Original spec mentioned data-testid 'filter-hint' but code uses 'filters-hint' (with an s). Minor naming inconsistency — current works but worth aligning docs.",
+    "Reset button at top of filter sidebar uses 'filters-reset' (line 218) while the bottom one uses 'reset-filters-btn' (line 341) — both behave the same. Two reset buttons may surprise users; one would suffice.",
+    "OffersPage.jsx is 447 lines — borderline OK. If it grows, extract <Sidebar /> into its own file.",
+    "AdminOfficialProfilePage uses dynamic data-testid `field-${f.key}` which works, but it depends on `f.key` matching exactly ('display_name','slogan','website_url','contact_email'). Stable, but document for testers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter19_phaseI.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Admin bernardolivieri1326@gmail.com / OwnerAdmin2026! (worked, see /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Test register created a transient TEST_iter19_* candidate to validate non-reserved path; admin profile slogan was modified then restored to original.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 5 new features (Phase I) are fully functional. Key findings: (1) Nominatim geocoding for Saumur correctly returns Pays de la Loire region, cache lookups work. (2) Reserved-name normalization handles 'StageEtudiant.com', 'Stage Etudiant', 'stageetudiant' — all rejected with HTTP 400 + 'réservé' message. (3) PATCH /api/admin/official-profile correctly gated (401 anon). (4) OffersPage Rechercher button is the ONLY way to trigger /api/offers fetch after typing — verified delta=0 requests on type, delta=1 on click. URL params correctly reflect filters (?q=data). (5) Admin edit-save persists across reload. PremiumBadge visible on landing Stagiaires en vedette (PREMIUM tags). For future runs use .last selector when targeting OffersPage sidebar buttons (duplicate DOM, only desktop visible at 1920px).",
+  "rca of the issue": "No issues found in this iteration."
+}

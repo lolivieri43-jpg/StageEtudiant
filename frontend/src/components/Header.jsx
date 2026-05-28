@@ -134,6 +134,8 @@ export default function Header() {
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/deals")} data-testid="menu-admin-deals">Modération bons plans</DropdownMenuItem>}
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/ads")} data-testid="menu-admin-ads">Modération publicités</DropdownMenuItem>}
                 {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/reports")} data-testid="menu-admin-reports">Signalements</DropdownMenuItem>}
+                {user.role === "admin" && <DropdownMenuItem onClick={() => navigate("/admin/official-profile")} data-testid="menu-admin-official">Profil officiel StageEtudiant.com</DropdownMenuItem>}
+                <DropdownMenuItem onClick={() => navigate("/a-propos")} data-testid="menu-about">À propos</DropdownMenuItem>
                 {user.role === "company" && <DropdownMenuItem onClick={() => navigate("/ads/mine")} data-testid="menu-my-ads">Mes publicités</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} data-testid="menu-logout" className="text-red-600"><LogOut className="w-4 h-4 mr-2" />Déconnexion</DropdownMenuItem>
@@ -146,6 +148,7 @@ export default function Header() {
               {effective === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
             <Link to="/login" data-testid="header-login-link"><Button variant="ghost" className="rounded-full">Se connecter</Button></Link>
+            <Link to="/a-propos" data-testid="header-about-link" className="hidden sm:inline"><Button variant="ghost" className="rounded-full">À propos</Button></Link>
             <Link to="/register" data-testid="header-register-link">
               <Button className="rounded-full bg-blue-600 hover:bg-blue-700">S'inscrire</Button>
             </Link>

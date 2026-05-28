@@ -12,6 +12,7 @@ import { Textarea } from "../components/ui/textarea";
 import OfferCard from "../components/OfferCard";
 import FileUploader from "../components/FileUploader";
 import SiretLookup from "../components/SiretLookup";
+import PremiumBadge, { isPremiumActive } from "../components/PremiumBadge";
 import { DIPLOMA_LEVELS } from "../lib/diplomas";
 import { toast } from "sonner";
 
@@ -204,6 +205,9 @@ export default function ProfilePage() {
               <div className="flex flex-wrap items-center gap-2 mb-1">
                 <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900" data-testid="profile-name">{profile.name}</h1>
                 {p.verified && <CheckCircle2 className="w-5 h-5 text-blue-500" />}
+                {isPremiumActive(profile) && (
+                  <PremiumBadge role={isCompany ? "company" : "candidate"} size="sm" />
+                )}
               </div>
               <p className="text-slate-600 mb-3">{p.title || p.sector || (isCompany ? "Entreprise" : "Étudiant·e")}</p>
               {statusInfo && (

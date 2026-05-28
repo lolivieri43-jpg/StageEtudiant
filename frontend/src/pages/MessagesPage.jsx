@@ -6,6 +6,7 @@ import { Send, Search, Paperclip, FileText, Image as ImageIcon, X, Loader2 } fro
 import { Button } from "../components/ui/button";
 import useChatSocket from "../hooks/useChatSocket";
 import { toast } from "sonner";
+import PremiumBadge, { isPremiumActive } from "../components/PremiumBadge";
 
 export default function MessagesPage() {
   const { user } = useAuth();
@@ -185,8 +186,11 @@ export default function MessagesPage() {
                   <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full ${isOnline ? "bg-emerald-500" : "bg-slate-300"} border-2 border-white`}></span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-slate-900 truncate flex items-center justify-between">
-                    {c.other?.name}
+                  <div className="font-semibold text-slate-900 truncate flex items-center justify-between gap-2">
+                    <span className="truncate flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{c.other?.name}</span>
+                      {isPremiumActive(c.other) && <PremiumBadge role={c.other?.role === "company" ? "company" : "candidate"} size="xs" />}
+                    </span>
                     {c.unread > 0 && <span className="bg-blue-600 text-white text-[10px] font-bold rounded-full px-1.5">{c.unread}</span>}
                   </div>
                   <div className="text-xs text-slate-500 truncate">{c.last_message}</div>
@@ -209,7 +213,10 @@ export default function MessagesPage() {
                   <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full ${isActiveOnline ? "bg-emerald-500" : "bg-slate-300"} border-2 border-white`}></span>
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900">{activeUser.name}</div>
+                  <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                    {activeUser.name}
+                    {isPremiumActive(activeUser) && <PremiumBadge role={activeUser?.role === "company" ? "company" : "candidate"} size="xs" />}
+                  </div>
                   <div className="text-xs flex items-center gap-1" data-testid="presence-indicator">
                     <span className={`w-2 h-2 rounded-full ${isActiveOnline ? "bg-emerald-500" : "bg-slate-300"}`}></span>
                     {isActiveOnline ? "En ligne" : "Hors ligne"}

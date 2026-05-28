@@ -4,6 +4,7 @@ import api from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Check, X, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
+import PremiumBadge, { isPremiumActive } from "../components/PremiumBadge";
 
 export default function ContactsPage() {
   const [data, setData] = useState({ contacts: [], pending: [], sent: [] });
@@ -55,7 +56,10 @@ export default function ContactsPage() {
                     {c.profile?.avatar || c.profile?.logo ? <img src={c.profile.avatar || c.profile.logo} className="w-full h-full rounded-full object-cover" alt="" /> : c.name[0]}
                   </Link>
                   <div className="flex-1 min-w-0">
-                    <Link to={`/profile/${c.user_id}`} className="font-semibold truncate hover:text-blue-600 block">{c.name}</Link>
+                    <div className="flex items-center gap-2">
+                      <Link to={`/profile/${c.user_id}`} className="font-semibold truncate hover:text-blue-600 block">{c.name}</Link>
+                      {isPremiumActive(c) && <PremiumBadge role={c.role === "company" ? "company" : "candidate"} size="xs" />}
+                    </div>
                     <div className="text-xs text-slate-500 truncate">{c.profile?.title || c.profile?.sector}</div>
                   </div>
                   <Link to={`/messages?user=${c.user_id}`}><Button variant="outline" size="icon" className="rounded-full"><MessageSquare className="w-4 h-4" /></Button></Link>

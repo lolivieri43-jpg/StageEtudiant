@@ -43,6 +43,8 @@ import CVPage from "./pages/CVPage";
 import CompanyDirectoryPage from "./pages/CompanyDirectoryPage";
 import MyCompaniesPage from "./pages/MyCompaniesPage";
 import SearchHistoryPage from "./pages/SearchHistoryPage";
+import AboutPage from "./pages/AboutPage";
+import AdminOfficialProfilePage from "./pages/AdminOfficialProfilePage";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -98,6 +100,9 @@ function AppRouter() {
         <Route path="/companies" element={<CompanyDirectoryPage />} />
         <Route path="/my-companies" element={<Protected><MyCompaniesPage /></Protected>} />
         <Route path="/history" element={<Protected><SearchHistoryPage /></Protected>} />
+        <Route path="/a-propos" element={<AboutPage />} />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/admin/official-profile" element={<Protected><AdminOfficialProfilePage /></Protected>} />
       </Routes>
     </ThemeProvider>
   );

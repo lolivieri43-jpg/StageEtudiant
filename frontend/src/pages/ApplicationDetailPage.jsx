@@ -8,6 +8,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Download, MessageSquare, User, CheckCircle2, XCircle, Calendar, Archive, FileText, FileCheck2, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { triggerBlobDownload } from "../lib/download";
+import PremiumBadge, { isPremiumActive } from "../components/PremiumBadge";
 
 const STATUS_LABELS = {
   envoyee: "Envoyée",
@@ -184,7 +185,10 @@ export default function ApplicationDetailPage() {
                     {candidate.profile?.avatar ? <img src={candidate.profile.avatar} className="w-full h-full rounded-full object-cover" alt="" /> : candidate.name[0]}
                   </div>
                   <div>
-                    <Link to={`/profile/${candidate.user_id}`} className="font-bold hover:text-blue-600">{candidate.name}</Link>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Link to={`/profile/${candidate.user_id}`} className="font-bold hover:text-blue-600">{candidate.name}</Link>
+                      {isPremiumActive(candidate) && <PremiumBadge role="candidate" size="xs" />}
+                    </div>
                     <div className="text-xs text-slate-500">{candidate.profile?.title}</div>
                   </div>
                 </div>

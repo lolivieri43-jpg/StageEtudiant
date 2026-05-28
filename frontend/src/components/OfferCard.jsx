@@ -2,6 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { MapPin, Clock, Briefcase, CheckCircle2, Wifi, ExternalLink } from "lucide-react";
 import { Badge } from "./ui/badge";
+import PremiumBadge, { isPremiumActive } from "./PremiumBadge";
 
 const SOURCE_LABELS = {
   StageConnect: "StageEtudiant",
@@ -44,9 +45,12 @@ export default function OfferCard({ offer }) {
           {offer.company_logo ? <img src={offer.company_logo} className="w-full h-full object-cover" alt="" /> : offer.company_name?.[0]}
         </div>
         <div className="flex-1 min-w-0 pr-20">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-sm font-semibold text-slate-700 truncate">{offer.company_name}</span>
             {offer.verified && <CheckCircle2 className="w-4 h-4 text-blue-500 shrink-0" />}
+            {isPremiumActive(offer.company_premium || { is_premium: offer.company_is_premium, premium_status: offer.company_premium_status, premium_end_date: offer.company_premium_end_date }) && (
+              <PremiumBadge role="company" size="xs" />
+            )}
           </div>
           <h3 className="font-bold text-slate-900 leading-snug mb-2 truncate">{offer.title}</h3>
           <div className="flex flex-wrap gap-1.5 text-xs">
