@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import api from "../lib/api";
+import api, { backendUrl } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { Send, Search, Paperclip, FileText, Image as ImageIcon, X, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -127,8 +127,7 @@ export default function MessagesPage() {
       const form = new FormData();
       form.append("file", f);
       const { data } = await api.post("/upload?kind=message", form, { headers: { "Content-Type": "multipart/form-data" } });
-      const API = process.env.REACT_APP_BACKEND_URL || "";
-      const fullUrl = data.url.startsWith("http") ? data.url : `${API}${data.url}`;
+      const fullUrl = data.url.startsWith("http") ? data.url : backendUrl(data.url);
       setPendingAttachments(a => [...a, {
         type: detectType(data.content_type, data.filename),
         url: fullUrl, file_id: data.file_id, filename: data.filename,

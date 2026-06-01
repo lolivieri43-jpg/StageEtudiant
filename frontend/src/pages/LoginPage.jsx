@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { backendUrl } from "../lib/api";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -37,7 +38,7 @@ export default function LoginPage() {
   const googleLogin = () => {
     // Hits our backend, which builds the Google authorize URL with the correct redirect_uri
     // based on the current host (preview or production), then redirects to Google.
-    window.location.href = `${process.env.REACT_APP_BACKEND_URL}/api/auth/google`;
+    window.location.href = backendUrl("/api/auth/google");
   };
 
   return (

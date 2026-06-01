@@ -6,7 +6,7 @@ import FranceMap from "../components/FranceMap";
 import OfferCard from "../components/OfferCard";
 import PlatformCounter from "../components/PlatformCounter";
 import AISearchBar from "../components/AISearchBar";
-import api from "../lib/api";
+import api, { backendUrl } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
 export default function LandingPage() {
@@ -215,7 +215,7 @@ export default function LandingPage() {
                 )}
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-blue-400 to-violet-400 grid place-items-center text-white font-bold shrink-0">
-                    {c.profile?.avatar ? <img src={c.profile.avatar.startsWith("/api") ? `${process.env.REACT_APP_BACKEND_URL}${c.profile.avatar}` : c.profile.avatar} className="w-full h-full object-cover" alt="" /> : c.name?.[0]}
+                    {c.profile?.avatar ? <img src={c.profile.avatar.startsWith("/api") ? backendUrl(c.profile.avatar) : c.profile.avatar} className="w-full h-full object-cover" alt="" /> : c.name?.[0]}
                   </div>
                   <div className="min-w-0">
                     <div className="font-bold text-slate-900 truncate">{c.name}</div>

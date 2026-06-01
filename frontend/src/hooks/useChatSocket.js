@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
-const WS_URL = process.env.REACT_APP_BACKEND_URL.replace(/^http/, "ws") + "/api/ws";
+import { BACKEND_ORIGIN } from "../lib/api";
+const WS_URL = BACKEND_ORIGIN.replace(/^http/, "ws") + "/api/ws";
 
 export default function useChatSocket({ enabled, onMessage, onTyping, onPresence }) {
   const wsRef = useRef(null);

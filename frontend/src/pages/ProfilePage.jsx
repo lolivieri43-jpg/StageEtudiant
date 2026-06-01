@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import api from "../lib/api";
+import api, { backendUrl } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { CheckCircle2, MapPin, Briefcase, GraduationCap, MessageSquare, UserPlus, Edit2, FileText, Trash2, Image as ImageIcon, X, UserCheck, UserMinus, ShieldOff, FileCheck2 } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -438,7 +438,7 @@ const Field = ({ label, value, onChange, testid }) => (
 
 function resolveUrl(u) {
   if (!u) return u;
-  if (u.startsWith("/api/")) return process.env.REACT_APP_BACKEND_URL + u;
+  if (u.startsWith("/api/")) return backendUrl(u);
   return u;
 }
 

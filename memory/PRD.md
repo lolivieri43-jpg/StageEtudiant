@@ -25,6 +25,13 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 23 (2026-03-01) — 🐞 Bug-fix critique : inscription "Not Found" sur stageetudiant.com
+- **Cause racine** : `frontend/src/lib/api.js` ajoutait inconditionnellement `/api` au `REACT_APP_BACKEND_URL`. Sur la preview (`https://joblink-stages…`), ça donnait `…/api/auth/register` → OK. Mais sur la **prod** (où `REACT_APP_BACKEND_URL=https://stageetudiant.com/api`), ça donnait `https://stageetudiant.com/api/api/auth/register` → **404 Not Found** sur toute requête, dont l'inscription étudiant et entreprise.
+- **Correctif** : `lib/api.js` détecte désormais si l'URL finit déjà par `/api` et n'ajoute plus de double préfixe. Helpers `backendUrl(path)` et `BACKEND_ORIGIN` exportés pour les URLs construites manuellement (avatars, OAuth Google, WebSocket, uploads). Toutes les autres pages qui faisaient `${process.env.REACT_APP_BACKEND_URL}/api/...` mises à jour : `LoginPage.jsx`, `FeedPage.jsx`, `MessagesPage.jsx`, `LandingPage.jsx`, `ProfilePage.jsx`, `useChatSocket.js`.
+- **Validation E2E** : sur la preview, inscription étudiant + inscription entreprise (`POST 200`) avec redirection vers `/dashboard`. Toujours en `/api/auth/register` unique, plus de `/api/api/` nulle part.
+- ⚠️ **Action requise utilisateur** : redéployer le site (build prod) pour propager le fix sur `www.stageetudiant.com`. Tant que le build prod n'est pas mis à jour, la prod continuera de servir l'ancien JavaScript bogué.
+
+
 ## Iteration 22 (2026-03-01) — Split server.py final + Google OAuth (custom)
 - ✅ **Phase 2/2 du split `server.py`** : extraction des 6 routers restants → **server.py 3543 → 2967 lignes (-16 %)**
   - `routes/payments.py` (262 l) — abonnements + Stripe checkout/status/webhook + admin/monetization
