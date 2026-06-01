@@ -189,9 +189,36 @@ def clean_user(u: dict) -> dict:
 # ============ PROFILES / USERS — moved to routes/users.py ============
 from routes.auth import register_auth_routes
 from routes.users import register_users_routes
+from routes.google_oauth import register_google_oauth_routes
 register_auth_routes(api, db, get_current_user, hash_password, verify_password,
                      create_jwt, clean_user, update_online)
 register_users_routes(api, db, get_current_user, get_optional_user)
+register_google_oauth_routes(api, db, create_jwt)
+
+
+@api.post("/auth/choose-role")
+async def choose_role_after_oauth(body: dict, user=Depends(get_current_user)):
+    """Set the user role after Google sign-up. Allowed once when role is still None."""
+    if user.get("role") in ("candidate", "company"):
+        raise HTTPException(400, "Rôle déjà défini")
+    role = (body or {}).get("role")
+    if role == "alternant":
+        role = "candidate"
+    if role not in ("candidate", "company"):
+        raise HTTPException(400, "Rôle invalide")
+    profile = user.get("profile", {}) or {}
+    if role == "company":
+        profile.setdefault("company_name", user.get("name") or "")
+        profile.setdefault("verified", False)
+    else:
+        profile.setdefault("status", "en_recherche")
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"role": role, "profile": profile,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    refreshed = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password": 0})
+    return refreshed
 
 # ============ OFFERS — moved to routes/offers.py ============
 from routes.offers import register_offers_routes
@@ -1248,6 +1275,10 @@ async def ensure_indexes():
         # Ads indexes
         await db.ads.create_index([("status", 1)])
         await db.ads.create_index([("company_id", 1)])
+        # Google OAuth state — auto-expire after 10 minutes
+        await db.oauth_states.create_index([("state", 1)], unique=True)
+        await db.oauth_states.create_index("created_at", expireAfterSeconds=600)
+        await db.users.create_index([("google_id", 1)], sparse=True)
         logger.info("Mongo indexes ensured")
     except Exception as e:
         logger.warning(f"Index creation failed: {e}")

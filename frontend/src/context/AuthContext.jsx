@@ -25,6 +25,16 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    // Google OAuth (custom) returns the JWT in URL fragment "#token=…"
+    if (typeof window !== "undefined" && window.location.hash?.includes("token=")) {
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      const t = params.get("token");
+      if (t) {
+        localStorage.setItem("token", t);
+        // Clean the URL so the token isn't kept in the visible address bar
+        window.history.replaceState({}, "", window.location.pathname + window.location.search);
+      }
+    }
     if (window.location.hash?.includes("session_id=")) {
       setLoading(false);
       return;
