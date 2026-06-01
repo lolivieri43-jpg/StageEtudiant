@@ -231,7 +231,7 @@ function OnlineCvPreview({ cv }) {
           <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Expériences</div>
           <ul className="space-y-2">
             {cv.experiences.map((e, i) => (
-              <li key={i} className="border-l-2 border-blue-200 pl-3">
+              <li key={`${e.company_name || "exp"}-${e.start_date || i}`} className="border-l-2 border-blue-200 pl-3">
                 <div className="font-semibold text-slate-900">{e.job_title} — {e.company_name}</div>
                 <div className="text-xs text-slate-500">{e.city} · {e.start_date} → {e.end_date || "En cours"} · {e.experience_type}</div>
                 {e.description && <div className="text-slate-700 mt-0.5 whitespace-pre-wrap">{e.description}</div>}
@@ -245,7 +245,7 @@ function OnlineCvPreview({ cv }) {
           <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Formation</div>
           <ul className="space-y-2">
             {cv.educations.map((e, i) => (
-              <li key={i} className="border-l-2 border-violet-200 pl-3">
+              <li key={`${e.school || "edu"}-${e.start_date || i}`} className="border-l-2 border-violet-200 pl-3">
                 <div className="font-semibold text-slate-900">{e.degree} — {e.school}</div>
                 <div className="text-xs text-slate-500">{e.city} · {e.start_date} → {e.end_date}</div>
                 {e.description && <div className="text-slate-700">{e.description}</div>}
@@ -258,7 +258,7 @@ function OnlineCvPreview({ cv }) {
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-1">Compétences</div>
           <div className="flex flex-wrap gap-1.5">
-            {cv.skills.map((s, i) => <span key={i} className="rounded-full bg-violet-50 text-violet-700 text-xs px-2.5 py-0.5">{s}</span>)}
+            {cv.skills.map((s) => <span key={s} className="rounded-full bg-violet-50 text-violet-700 text-xs px-2.5 py-0.5">{s}</span>)}
           </div>
         </div>
       )}

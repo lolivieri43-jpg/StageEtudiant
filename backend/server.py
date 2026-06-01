@@ -599,8 +599,6 @@ async def set_application_status(app_id: str, body: dict, user=Depends(get_curre
     await notify(a["candidate_id"], "application_status", f"Votre candidature \"{a['offer_title']}\" est maintenant: {status}", "/dashboard")
     return {"ok": True}
 
-    return users
-
 # ============ CONTACT EXTENSIONS — moved to routes/contacts.py ============
 
 # ============ MASSIVE SEED v3 ============
@@ -1079,6 +1077,7 @@ async def list_connectors(user=Depends(get_current_user)):
 
 # ============ ITERATION 5: AVATAR/BANNER UPLOAD + COMPRESSION ============
 from PIL import Image
+import io
 
 def compress_image(data: bytes, max_w: int, max_h: int, quality: int = 82, fmt: str = "JPEG") -> bytes:
     img = Image.open(io.BytesIO(data))
@@ -1675,7 +1674,6 @@ def build_cv_pdf(user: dict, cv: dict, template: str = "modern") -> bytes:
         doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=0*cm, rightMargin=0*cm,
                                 topMargin=0*cm, bottomMargin=0*cm)
         # build main + sidebar columns
-        sb_title_color = rl_colors.white
         main_body = ParagraphStyle("mainBody", fontSize=10, leading=14, spaceAfter=6,
                                    textColor=rl_colors.HexColor("#0F172A"))
         main_section = ParagraphStyle("mainSection", fontSize=11, fontName="Helvetica-Bold",

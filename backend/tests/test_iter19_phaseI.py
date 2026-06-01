@@ -13,8 +13,7 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
-ADMIN_EMAIL = "bernardolivieri1326@gmail.com"
-ADMIN_PASSWORD = "OwnerAdmin2026!"
+from _creds import ADMIN_EMAIL, ADMIN_PASSWORD  # noqa: E402
 
 
 @pytest.fixture(scope="session")

@@ -127,7 +127,7 @@ export default function FeedPage() {
                 {media.length > 0 && (
                   <div className="grid grid-cols-2 gap-2 mt-3" data-testid="media-previews">
                     {media.map((m, i) => (
-                      <div key={i} className="relative rounded-xl overflow-hidden bg-slate-100 group">
+                      <div key={m.file_id || m.url || `media-${i}`} className="relative rounded-xl overflow-hidden bg-slate-100 group">
                         {m.type === "image" && <img src={m.url} alt="" className="w-full h-32 object-cover" />}
                         {m.type === "video" && (
                           <div className="w-full h-32 grid place-items-center bg-slate-900 text-white">
@@ -326,7 +326,7 @@ const PostCard = ({ post, user, onLike }) => {
       {mediaList.length > 0 && (
         <div className={`grid gap-2 mb-4 ${mediaList.length > 1 ? "grid-cols-2" : "grid-cols-1"}`} data-testid={`media-${post.post_id}`}>
           {mediaList.map((m, i) => (
-            <PostMedia key={i} m={m} />
+            <PostMedia key={m.file_id || m.url || `pm-${post.post_id}-${i}`} m={m} />
           ))}
         </div>
       )}

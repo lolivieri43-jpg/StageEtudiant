@@ -16,10 +16,12 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://joblink-stages.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = "admin@stagiaireconnect.fr"
-ADMIN_PASSWORD = "Admin123!"
-CAND_EMAIL = "lucas.martin@email.fr"
-CAND_PASSWORD = "Demo1234!"
+from _creds import (  # noqa: E402
+    LEGACY_ADMIN_EMAIL as ADMIN_EMAIL,
+    LEGACY_ADMIN_PASSWORD as ADMIN_PASSWORD,
+    CANDIDATE_EMAIL as CAND_EMAIL,
+    CANDIDATE_PASSWORD as CAND_PASSWORD,
+)
 
 
 def _login(email, password):

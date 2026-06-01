@@ -235,7 +235,7 @@ export default function MessagesPage() {
                             {m.content}
                           </div>
                         )}
-                        {atts.map((a, i) => <MessageAttachmentView key={i} a={a} mine={mine} />)}
+                        {atts.map((a, i) => <MessageAttachmentView key={a.file_id || a.url || `att-${i}`} a={a} mine={mine} />)}
                       </div>
                     </div>
                   );
@@ -256,7 +256,7 @@ export default function MessagesPage() {
                 {pendingAttachments.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2" data-testid="pending-attachments">
                     {pendingAttachments.map((a, i) => (
-                      <div key={i} className="relative rounded-xl border border-slate-200 p-2 pr-7 flex items-center gap-2 bg-slate-50 max-w-[200px]">
+                      <div key={a.file_id || a.url || `pa-${i}`} className="relative rounded-xl border border-slate-200 p-2 pr-7 flex items-center gap-2 bg-slate-50 max-w-[200px]">
                         {a.type === "image" && <img src={a.url} alt="" className="w-8 h-8 rounded-lg object-cover" />}
                         {a.type === "video" && <div className="w-8 h-8 rounded-lg bg-slate-900 text-white grid place-items-center"><Paperclip className="w-3 h-3" /></div>}
                         {(a.type === "pdf" || a.type === "file") && <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 grid place-items-center"><FileText className="w-4 h-4" /></div>}

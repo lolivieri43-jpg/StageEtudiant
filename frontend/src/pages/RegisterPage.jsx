@@ -45,7 +45,10 @@ export default function RegisterPage() {
             siret_verified: true,
             siret_verified_at: new Date().toISOString(),
           });
-        } catch { /* non-blocking */ }
+        } catch (err) {
+          /* non-blocking: company profile enrichment is best-effort */
+          console.warn("SIRET profile enrichment failed:", err?.message || err);
+        }
       }
       toast.success("Compte créé !");
       navigate("/dashboard");

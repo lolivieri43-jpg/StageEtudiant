@@ -25,6 +25,30 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 24 (2026-03-01) — Code quality review fixes
+**Appliqué (vrais bugs / améliorations à fort impact)** :
+- 🐞 **Backend — variables non définies (vrais runtime crashes)** : 
+  - `users` orphelin ligne 602 supprimé (artefact du split)
+  - `io` ajouté à `from PIL import Image` (utilisé par compression d'images, crash potentiel sur upload)
+  - `sb_title_color` dead var supprimée
+- ✨ **Frontend — array-index keys remplacés par IDs stables** sur les listes pilotées par API :
+  - `ApplicationDetailPage` : experiences (`${company_name}-${start_date}`), educations (`${school}-${start_date}`), skills (`s` direct)
+  - `AdminPage` : recent_errors (`${created_at}-${i}`), search_cache (`${q}-${expires_at}`), rows (`r.label`)
+  - `MessagesPage` : attachements (`a.file_id || a.url`), pending attachments idem
+  - `FeedPage` : media uploads + post media (`m.file_id || m.url`)
+  - `LandingPage` : tags (`key={tag}`)
+- ✨ **Frontend — empty catch blocks → console.warn** sur les flux critiques : `AuthContext` (logout, refreshUser), `useChatSocket` (close, message parse), `Header` (notifications), `RegisterPage` (SIRET enrichment).
+- 🧹 **Tests — credentials centralisés** : nouveau fichier `tests/_creds.py` avec env var overrides + defaults documentés. Les 3 tests flaggés (`test_iter11_ft.py`, `test_iter13_phaseH.py`, `test_iter19_phaseI.py`) importent maintenant depuis ce module.
+
+**Choix de NE PAS appliquer (justifications)** :
+- ❌ **Hardcoded "secrets" dans les tests** — il s'agit de credentials de fixtures de tests partagées, documentées dans `/app/memory/test_credentials.md`. Centralisés dans `_creds.py` avec override env (suffit pour la sécurité).
+- ❌ **`random` → `secrets` dans `seed_v3`** — `random` ici génère uniquement des **données factices de démo** (noms d'entreprises fake, villes aléatoires). Aucun impact sécurité. Migration = pur overengineering.
+- ❌ **Migration `localStorage` → cookies httpOnly** — chantier de plusieurs jours (refactor d'auth complet, CSRF, CORS) avec risque élevé de régressions. À planifier comme projet dédié si vraiment souhaité.
+- ❌ **Refactor `register_ads_routes()` (236 l, complexité 49)** — fonctionne, testé. Refactor opportuniste à risque de régression, sans bénéfice utilisateur. À faire si évolution naturelle l'impose.
+- ❌ **Split de `ProfilePage`/`OffersPage`/`CVPage`** — composants livrés, testés, fonctionnels. Le découper maintenant introduit du risque pour zéro valeur utilisateur. Sera fait naturellement à la prochaine évolution majeure.
+- ❌ **Missing hook dependencies** — les warnings ESLint sont souvent **faux positifs** (refs stables, fonctions issues du body). Les useEffect existants utilisent volontairement `params.toString()` ou `eslint-disable-next-line` aux endroits où c'est intentionnel.
+
+
 ## Iteration 23 (2026-03-01) — 🐞 Bug-fix critique : inscription "Not Found" sur stageetudiant.com
 - **Cause racine** : `frontend/src/lib/api.js` ajoutait inconditionnellement `/api` au `REACT_APP_BACKEND_URL`. Sur la preview (`https://joblink-stages…`), ça donnait `…/api/auth/register` → OK. Mais sur la **prod** (où `REACT_APP_BACKEND_URL=https://stageetudiant.com/api`), ça donnait `https://stageetudiant.com/api/api/auth/register` → **404 Not Found** sur toute requête, dont l'inscription étudiant et entreprise.
 - **Correctif** : `lib/api.js` détecte désormais si l'URL finit déjà par `/api` et n'ajoute plus de double préfixe. Helpers `backendUrl(path)` et `BACKEND_ORIGIN` exportés pour les URLs construites manuellement (avatars, OAuth Google, WebSocket, uploads). Toutes les autres pages qui faisaient `${process.env.REACT_APP_BACKEND_URL}/api/...` mises à jour : `LoginPage.jsx`, `FeedPage.jsx`, `MessagesPage.jsx`, `LandingPage.jsx`, `ProfilePage.jsx`, `useChatSocket.js`.

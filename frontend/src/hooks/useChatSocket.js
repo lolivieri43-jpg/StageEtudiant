@@ -20,14 +20,14 @@ export default function useChatSocket({ enabled, onMessage, onTyping, onPresence
         reconnectTimer.current = setTimeout(connect, 3000);
       }
     };
-    ws.onerror = () => { try { ws.close(); } catch {} };
+    ws.onerror = () => { try { ws.close(); } catch (e) { /* socket already closed */ } };
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === "message" && onMessage) onMessage(data.message);
         else if (data.type === "typing" && onTyping) onTyping(data);
         else if (data.type === "presence" && onPresence) onPresence(data);
-      } catch {}
+      } catch (err) { console.warn("WS message parse failed:", err?.message || err); }
     };
   }, [enabled, onMessage, onTyping, onPresence]);
 
@@ -36,7 +36,7 @@ export default function useChatSocket({ enabled, onMessage, onTyping, onPresence
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (wsRef.current) {
-        try { wsRef.current.close(); } catch {}
+        try { wsRef.current.close(); } catch (e) { /* socket already closed */ }
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

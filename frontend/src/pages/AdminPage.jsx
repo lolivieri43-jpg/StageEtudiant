@@ -157,7 +157,7 @@ export default function AdminPage() {
                 <div className="text-xs font-semibold text-slate-500 mb-1">Erreurs récentes ({apiStats.recent_errors.length})</div>
                 <div className="space-y-1 text-[11px] text-rose-700">
                   {apiStats.recent_errors.slice(0, 5).map((e, i) => (
-                    <div key={i}>{e.created_at?.slice(0,16).replace('T',' ')} · {e.error?.slice(0, 100)}</div>
+                    <div key={`${e.created_at}-${i}`}>{e.created_at?.slice(0,16).replace('T',' ')} · {e.error?.slice(0, 100)}</div>
                   ))}
                 </div>
               </div>
@@ -181,7 +181,7 @@ export default function AdminPage() {
               <Tile label="Fiches détaillées en cache" value={cache.details_cache_count} />
             </div>
             {cache.search_cache_entries.slice(0, 6).map((e, i) => (
-              <div key={i} className="text-xs text-slate-500 border-t border-slate-100 py-1.5 flex justify-between gap-3">
+              <div key={`${e.query?.q || ""}-${e.expires_at || i}`} className="text-xs text-slate-500 border-t border-slate-100 py-1.5 flex justify-between gap-3">
                 <span className="truncate">q={e.query?.q || "—"} · cp={e.query?.code_postal || "—"} · dpt={e.query?.departement || "—"}</span>
                 <span className="shrink-0">Exp: {e.expires_at?.slice(0, 10)} · {e.results_count} rés.</span>
               </div>
@@ -287,7 +287,7 @@ const RankList = ({ title, rows, testid }) => (
     {rows.length === 0 && <div className="text-xs text-slate-400 italic">Aucune donnée</div>}
     <ul className="space-y-1 text-sm">
       {rows.slice(0, 6).map((r, i) => (
-        <li key={i} className="flex justify-between border-b border-slate-100 py-0.5">
+        <li key={r.label || `row-${i}`} className="flex justify-between border-b border-slate-100 py-0.5">
           <span className="truncate max-w-[80%]">{r.label || "—"}</span>
           <span className="font-bold text-blue-600">{r.n}</span>
         </li>

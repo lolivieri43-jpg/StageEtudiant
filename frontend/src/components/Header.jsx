@@ -27,7 +27,7 @@ export default function Header() {
       try {
         const { data } = await api.get("/notifications");
         setUnread(data.unread);
-      } catch {}
+      } catch (err) { console.warn("notifications fetch failed:", err?.message || err); }
     };
     fetchUnread();
     const t = setInterval(fetchUnread, 30000);

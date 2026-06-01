@@ -252,8 +252,8 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {["-30% Pizza", "Code -20%", "Cinéma 5€", "Sport offert"].map((tag, i) => (
-              <div key={i} className="card-soft p-5 text-center hover-lift">
+            {["-30% Pizza", "Code -20%", "Cinéma 5€", "Sport offert"].map((tag) => (
+              <div key={tag} className="card-soft p-5 text-center hover-lift">
                 <div className="text-2xl font-black gradient-text">{tag.split(" ")[0]}</div>
                 <div className="text-xs text-slate-500 mt-1">{tag.split(" ").slice(1).join(" ")}</div>
               </div>

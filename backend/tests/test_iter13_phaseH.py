@@ -8,8 +8,7 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://joblink-stages.preview.emergentagent.com").rstrip("/")
-ADMIN_EMAIL = "admin@stagiaireconnect.fr"
-ADMIN_PASSWORD = "Admin123!"
+from _creds import LEGACY_ADMIN_EMAIL as ADMIN_EMAIL, LEGACY_ADMIN_PASSWORD as ADMIN_PASSWORD  # noqa: E402
 
 
 @pytest.fixture(scope="module")
