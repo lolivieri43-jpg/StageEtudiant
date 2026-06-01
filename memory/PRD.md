@@ -25,6 +25,24 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 22 (2026-03-01) — Split server.py final + Google OAuth (custom)
+- ✅ **Phase 2/2 du split `server.py`** : extraction des 6 routers restants → **server.py 3543 → 2967 lignes (-16 %)**
+  - `routes/payments.py` (262 l) — abonnements + Stripe checkout/status/webhook + admin/monetization
+  - `routes/storage.py` (156 l) — /upload + /files/{id} (avec ACL : avatar/banner/post = public ; documents = visibilité contact/application)
+  - `routes/documents.py` (52 l) — documents étudiants (CV, lettre, convention) avec ACL
+  - `routes/gallery.py` (45 l) — galeries photos entreprises
+  - `routes/students_search.py` (71 l) — `/search/students` + `/search/students-nearby` (acceptent role company OU admin)
+  - `routes/geocoding.py` (145 l) — CITY_COORDS, haversine, /cities, /geocode, /offers-nearby
+- ✅ **Google OAuth custom** (clés propres du client, NON Emergent-managed) :
+  - `GET /api/auth/google` → 302 vers Google avec state CSRF + redirect_uri auto-détecté depuis le Host (preview vs prod, sans hardcoding).
+  - `GET /api/auth/google/callback` → échange code, vérifie `email_verified`, lie un compte email existant ou crée (role=None, provider="google"), pose le JWT en fragment `#token=...`, redirige vers `/choose-role` (1er login) ou `/dashboard`.
+  - `POST /api/auth/choose-role` → finalise le rôle (`candidate` ou `company`, `alternant` alias de `candidate`), idempotent.
+  - Sécurité : `db.oauth_states` TTL 10 min pour anti-CSRF, refus si email Google non vérifié, JWT en fragment URL (non journalisé par proxies), `client_secret` jamais exposé au front.
+  - Compatible avec l'auth email/mot de passe existante et avec `/api/auth/session` (Emergent-managed) inchangé.
+- ✅ Frontend : bouton « Continuer avec Google » sur `/login` → redirige vers `${REACT_APP_BACKEND_URL}/api/auth/google` (plus aucun lien hardcodé). Nouvelle page publique `/choose-role` (UI Étudiant/Alternant vs Entreprise/CFA) appelée au 1er login Google. `AuthContext` lit `#token=...` à l'arrivée pour persister le JWT et nettoyer l'URL.
+- ✅ Tests `/app/test_reports/iteration_22.json` — **18/18 backend + 4/4 frontend** (100 %, aucune régression). Avec les placeholders `xxxx...` dans `.env`, les routes Google renvoient 503 (comportement attendu). Dès que l'utilisateur remplace `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, le 302 vers Google s'active immédiatement (vérifié à l'avance via test temporaire).
+
+
 ## Iteration 21 (2026-02-28) — Bug-fix : recherche entreprise & recherche stagiaire
 - 🐞 **Bug 1** — Filtre « Entreprise » sur /offers : auparavant `company_contains_term` exigeait un match en **mot entier** (regex `\b`). Taper « Beta » ne matchait pas « BetaSystems081 ». Correctif (`/app/backend/geo_search.py`) : substring match accent-insensible dès 3 caractères ; mot entier conservé pour ≤ 2 lettres (anti-bruit). Validation : `?company=Beta` → 3 offres (BetaSystems081 x2 + BetaTech065). `?company=Sofratom` → 0 (aucun enregistrement nulle part). `?company=a` → 0 (filtre court).
 - 🐞 **Bug 2** — `/search/students` : page bloquée pour le rôle `admin` (« Réservé aux entreprises »). Correctifs : `SearchStudentsPage.jsx` accepte `admin` ; entrée `Rechercher des étudiants` ajoutée au menu admin (`Header.jsx`). Backend `/api/search/students` acceptait déjà `("company","admin")`. Search par `name`, `first_name`, `last_name` reste effective.
