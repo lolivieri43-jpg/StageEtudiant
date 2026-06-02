@@ -215,6 +215,113 @@ def geocode_french_city(city: Optional[str]) -> Optional[Tuple[float, float]]:
     return None
 
 
+async def geocode_geoapify(db, query: str, country: Optional[str] = None) -> Optional[Tuple[float, float, dict]]:
+    """Geocode via Geoapify (better worldwide coverage than Nominatim). Cached 30 days in
+    db.geocoding_cache (shared with Nominatim, key prefixed by 'gapi:').
+
+    Returns (lat, lon, meta) or None. Meta keys: normalized_city, postal_code, region, country, country_code.
+    """
+    import os
+    from datetime import datetime, timezone, timedelta
+    import httpx
+
+    api_key = os.environ.get("GEOAPIFY_API_KEY")
+    if not api_key:
+        return None
+    q = (query or "").strip()
+    if not q:
+        return None
+    if country and country.lower() not in q.lower():
+        q = f"{q}, {country}"
+    cache_key = f"gapi:{q.lower()}"
+    cache = await db.geocoding_cache.find_one({"query": cache_key}, {"_id": 0})
+    if cache:
+        exp = cache.get("expires_at")
+        try:
+            exp_dt = datetime.fromisoformat(exp) if isinstance(exp, str) else exp
+            if exp_dt and exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            if exp_dt and exp_dt > datetime.now(timezone.utc):
+                if cache.get("latitude") and cache.get("longitude"):
+                    return float(cache["latitude"]), float(cache["longitude"]), {
+                        "normalized_city": cache.get("normalized_city"),
+                        "postal_code": cache.get("postal_code"),
+                        "region": cache.get("region"),
+                        "country": cache.get("country"),
+                        "country_code": cache.get("country_code"),
+                    }
+                return None
+        except Exception:
+            pass
+
+    started = datetime.now(timezone.utc)
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.get(
+                "https://api.geoapify.com/v1/geocode/search",
+                params={"text": q, "limit": 1, "format": "json", "apiKey": api_key},
+            )
+        if resp.status_code != 200:
+            await db.geocoding_api_logs.insert_one({
+                "provider": "geoapify", "query": q, "status": resp.status_code,
+                "response_time_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+                "error_message": resp.text[:500],
+                "created_at": started.isoformat(),
+            })
+            return None
+        data = resp.json()
+        results = data.get("results") or []
+        meta_log = {
+            "provider": "geoapify", "query": q, "status": 200,
+            "response_time_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+            "created_at": started.isoformat(),
+        }
+        if not results:
+            await db.geocoding_api_logs.insert_one(meta_log)
+            # negative cache (1 day) so we don't keep hitting empty queries
+            await db.geocoding_cache.update_one(
+                {"query": cache_key},
+                {"$set": {
+                    "query": cache_key, "source": "geoapify",
+                    "created_at": started.isoformat(),
+                    "expires_at": (started + timedelta(days=1)).isoformat(),
+                }},
+                upsert=True,
+            )
+            return None
+        r = results[0]
+        lat = float(r.get("lat"))
+        lon = float(r.get("lon"))
+        meta = {
+            "normalized_city": r.get("city") or r.get("county") or r.get("name"),
+            "postal_code": r.get("postcode"),
+            "region": r.get("state"),
+            "country": r.get("country"),
+            "country_code": (r.get("country_code") or "").upper() or None,
+        }
+        await db.geocoding_api_logs.insert_one(meta_log)
+        await db.geocoding_cache.update_one(
+            {"query": cache_key},
+            {"$set": {
+                "query": cache_key, "source": "geoapify",
+                "latitude": lat, "longitude": lon, **meta,
+                "raw_payload_json": r,
+                "created_at": started.isoformat(),
+                "expires_at": (started + timedelta(days=30)).isoformat(),
+            }},
+            upsert=True,
+        )
+        return lat, lon, meta
+    except Exception as e:
+        await db.geocoding_api_logs.insert_one({
+            "provider": "geoapify", "query": q, "status": 0,
+            "response_time_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+            "error_message": str(e)[:500],
+            "created_at": started.isoformat(),
+        })
+        return None
+
+
 async def geocode_nominatim(db, city: str, country: str = "France") -> Optional[Tuple[float, float, dict]]:
     """Geocode via Nominatim/OSM with 30-day Mongo cache.
     Returns (lat, lon, meta) or None. Meta includes normalized_city, postal_code, department, region, country_code.

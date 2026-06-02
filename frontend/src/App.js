@@ -46,6 +46,7 @@ import SearchHistoryPage from "./pages/SearchHistoryPage";
 import AboutPage from "./pages/AboutPage";
 import AdminOfficialProfilePage from "./pages/AdminOfficialProfilePage";
 import ChooseRolePage from "./pages/ChooseRolePage";
+import MapPage from "./pages/MapPage";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -105,6 +106,8 @@ function AppRouter() {
         <Route path="/about" element={<AboutPage />} />
         <Route path="/admin/official-profile" element={<Protected><AdminOfficialProfilePage /></Protected>} />
         <Route path="/choose-role" element={<Protected><ChooseRolePage /></Protected>} />
+        <Route path="/carte" element={<MapPage />} />
+        <Route path="/map" element={<MapPage />} />
       </Routes>
     </ThemeProvider>
   );

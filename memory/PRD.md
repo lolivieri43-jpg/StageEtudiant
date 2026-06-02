@@ -25,6 +25,25 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
+## Iteration 25 (2026-03-01) — Carte du monde interactive (Leaflet + Geoapify)
+- ✅ **Intégration Geoapify** : `geocode_geoapify(db, query, country)` dans `geo_search.py` — provider mondial avec cache Mongo 30 j + logs API + negative cache 1 j sur résultats vides. Compte Geoapify free tier (3 000 req/jour).
+- ✅ **Endpoint `GET /api/offers-map`** (chemin évite collision avec `/offers/{id}`) : retourne uniquement les offres avec coordonnées valides, supporte filtres `country`, `city`, `contract_type`, `domain`, `q`. Réponse formatée pour la carte (id, title, company, city, country, lat, lon, contract_type, url).
+- ✅ **Auto-géocodage à la création** : la création d'offre déclenche `ensure_offer_coords()` (Geoapify → Nominatim → FR_CITIES), persiste `location.{latitude,longitude,city,postal_code,country}` + top-level `latitude/longitude`. Géocode une seule fois (idempotent).
+- ✅ **Endpoint admin de backfill** : `POST /api/admin/offers/geocode-backfill?limit=50` — itère sur les offres sans coords, géocode via Geoapify, rate-limité à ~5 req/s. 51 offres existantes géolocalisées avec succès au premier test.
+- ✅ **Route POST `/api/offers/{id}/geocode`** — déclenche manuellement un géocoding sur une offre (owner ou admin).
+- ✅ **Page frontend `/carte`** (alias `/map`) — `react-leaflet@4` + `leaflet@1.9` + `react-leaflet-cluster` :
+  - Fond OpenStreetMap (gratuit, attribution affichée)
+  - Markers cluster (maxRadius 50) — décluster en cliquant
+  - Markers colorés selon le type de contrat (bleu = stage, violet = alternance)
+  - Popup au clic : titre, entreprise, ville/pays, type contrat, bouton « Voir l'offre »
+  - Sidebar filtres avec bouton « Rechercher sur la carte » + compteurs live (stage/alternance/total)
+  - Responsive : sidebar collapsible sur mobile (`<lg`)
+  - Attribution « © OpenStreetMap contributors · Geocoding by Geoapify »
+- ✅ Lien « Carte » ajouté à la barre de navigation du Header.
+- 🔧 **Suppression de `React.StrictMode`** : react-leaflet 4 conflicte avec la double-montée dev de StrictMode (« Map container is already initialized »). StrictMode est un no-op en production donc cet impact est dev-only.
+- ✅ Tests E2E navigateur : 0 erreurs JS, 51 markers + clusters visibles, clics fonctionnels, lien `/carte` dans header.
+
+
 ## Iteration 24 (2026-03-01) — Code quality review fixes
 **Appliqué (vrais bugs / améliorations à fort impact)** :
 - 🐞 **Backend — variables non définies (vrais runtime crashes)** : 

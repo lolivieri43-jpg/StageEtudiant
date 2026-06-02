@@ -225,6 +225,25 @@ from routes.offers import register_offers_routes
 register_offers_routes(api, db, get_current_user, lambda d: _premium_active_from_doc(d))
 _enrich_offers_with_premium = register_offers_routes.enrich  # alias for /offers-nearby below
 
+# Auto-geocode on offer creation + map endpoint + admin backfill
+from routes.map import register_map_routes
+register_map_routes(api, db, get_current_user)
+_ensure_offer_coords = register_map_routes.ensure_offer_coords
+
+
+@api.post("/offers/{offer_id}/geocode")
+async def trigger_offer_geocode(offer_id: str, user=Depends(get_current_user)):
+    """Idempotent: triggers Geoapify lookup + persists location on a given offer."""
+    offer = await db.offers.find_one({"offer_id": offer_id}, {"_id": 0})
+    if not offer:
+        raise HTTPException(404, "Offre introuvable")
+    if offer.get("company_id") != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(403, "Interdit")
+    coords = await _ensure_offer_coords(db, offer)
+    if not coords:
+        raise HTTPException(404, "Ville introuvable pour le géocoding")
+    return {"ok": True, "latitude": coords[0], "longitude": coords[1]}
+
 # ============ APPLICATIONS — moved to routes/applications.py ============
 
 # ============ POSTS / FEED — moved to routes/posts.py ============

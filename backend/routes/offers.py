@@ -98,6 +98,12 @@ def register_offers_routes(api_router, db, get_current_user, premium_active_from
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.offers.insert_one(doc)
+        # Best-effort geocoding so the offer appears on the world map immediately.
+        try:
+            from routes.map import ensure_offer_coords as _eoc
+            await _eoc(db, doc)
+        except Exception:
+            pass
         doc.pop("_id", None)
         return doc
 
