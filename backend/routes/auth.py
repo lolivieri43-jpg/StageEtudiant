@@ -46,9 +46,9 @@ RESERVED_REGISTER_NAMES = {
 
 
 def register_auth_routes(api_router, db, get_current_user, hash_password, verify_password,
-                         create_jwt, clean_user, update_online):
+                         create_jwt, clean_user, update_online, set_auth_cookie, clear_auth_cookie):
     @api_router.post("/auth/register")
-    async def register(data: RegisterIn):
+    async def register(data: RegisterIn, response: Response):
         existing = await db.users.find_one({"email": data.email}, {"_id": 0})
         if existing:
             raise HTTPException(400, "Email déjà utilisé")
@@ -75,15 +75,17 @@ def register_auth_routes(api_router, db, get_current_user, hash_password, verify
         }
         await db.users.insert_one(doc)
         token = create_jwt(user_id)
+        set_auth_cookie(response, token)
         return {"token": token, "user": clean_user({**doc})}
 
     @api_router.post("/auth/login")
-    async def login(data: LoginIn):
+    async def login(data: LoginIn, response: Response):
         user = await db.users.find_one({"email": data.email})
         if not user or not user.get("password") or not verify_password(data.password, user["password"]):
             raise HTTPException(401, "Email ou mot de passe incorrect")
         await update_online(user["user_id"])
         token = create_jwt(user["user_id"])
+        set_auth_cookie(response, token)
         return {"token": token, "user": clean_user({**user})}
 
     @api_router.post("/auth/session")
@@ -148,4 +150,5 @@ def register_auth_routes(api_router, db, get_current_user, hash_password, verify
         if token:
             await db.user_sessions.delete_many({"session_token": token})
         response.delete_cookie("session_token", path="/")
+        clear_auth_cookie(response)
         return {"ok": True}

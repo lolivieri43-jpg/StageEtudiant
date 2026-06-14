@@ -38,7 +38,7 @@ def _build_redirect_uri(request: Request) -> str:
     return f"https://{host}/api/auth/google/callback"
 
 
-def register_google_oauth_routes(api_router, db, create_jwt):
+def register_google_oauth_routes(api_router, db, create_jwt, set_auth_cookie):
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     frontend_url = os.environ.get("FRONTEND_URL", "")
@@ -167,4 +167,7 @@ def register_google_oauth_routes(api_router, db, create_jwt):
         )
         # Pass JWT via fragment so it isn't logged by intermediary proxies.
         redirect = f"{front}{next_path}#token={token}"
-        return RedirectResponse(redirect, status_code=302)
+        resp = RedirectResponse(redirect, status_code=302)
+        # ALSO set the HttpOnly cookie so the JWT is not stored in localStorage on subsequent visits.
+        set_auth_cookie(resp, token)
+        return resp

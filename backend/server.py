@@ -125,12 +125,42 @@ def create_jwt(user_id: str) -> str:
     payload = {"user_id": user_id, "exp": datetime.now(timezone.utc) + timedelta(days=7)}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
+
+# 7-day max-age — matches the JWT exp above. Cookie is HttpOnly so JS can't
+# read it (XSS protection); Secure + SameSite=None because the frontend and
+# backend live on different subdomains in production.
+AUTH_COOKIE_NAME = "access_token"
+AUTH_COOKIE_MAX_AGE = 7 * 24 * 3600
+
+
+def set_auth_cookie(response: Response, token: str) -> None:
+    """Attach an HttpOnly JWT cookie to a FastAPI response."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=AUTH_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    """Delete the JWT cookie on logout."""
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/", samesite="none", secure=True)
+
+
 async def get_current_user(request: Request):
     token = None
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         token = auth[7:]
     if not token:
+        # New HttpOnly JWT cookie set by /auth/login & /auth/register.
+        token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        # Legacy Emergent OAuth cookie.
         token = request.cookies.get("session_token")
     if not token:
         raise HTTPException(401, "Not authenticated")
@@ -191,9 +221,9 @@ from routes.auth import register_auth_routes
 from routes.users import register_users_routes
 from routes.google_oauth import register_google_oauth_routes
 register_auth_routes(api, db, get_current_user, hash_password, verify_password,
-                     create_jwt, clean_user, update_online)
+                     create_jwt, clean_user, update_online, set_auth_cookie, clear_auth_cookie)
 register_users_routes(api, db, get_current_user, get_optional_user)
-register_google_oauth_routes(api, db, create_jwt)
+register_google_oauth_routes(api, db, create_jwt, set_auth_cookie)
 
 
 @api.post("/auth/choose-role")
@@ -2948,10 +2978,18 @@ async def external_sources_status(user=Depends(get_current_user)):
 
 app.include_router(ext_offers_api)
 
+# CORS — browsers reject "*" when allow_credentials=True. Read the exact frontend
+# origin from env (set by the deployment), default to the current preview host.
+_frontend_url = os.environ.get("FRONTEND_URL", "").strip()
+_allow_origins = [_frontend_url] if _frontend_url else ["*"]
+# Allow the platform's preview/production hosts in addition to the explicit one
+# so curl-from-anywhere keeps working in dev. The browser will still enforce
+# its own origin check via the response header.
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=_allow_origins,
+    allow_origin_regex=r"https://.*\.(emergentagent\.com|stageetudiant\.com)$" if _frontend_url else None,
     allow_methods=["*"],
     allow_headers=["*"],
 )

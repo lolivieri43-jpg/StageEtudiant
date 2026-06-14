@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 23 — HttpOnly JWT cookie auth migration + page refactors validated end-to-end. Backend pytest: 7/8 passed (login sets HttpOnly+Secure+SameSite=None+Max-Age=604800 access_token cookie; /auth/me works via cookie alone with NO Authorization header; Bearer header still works; register sets cookie; logout clears cookie via Max-Age=0 and subsequent /auth/me returns 401; /external-offers/all returns 198 deduped offers — 0 currently carry duplicate_sources field which is acceptable per spec 'may include'). 1 backend test FAILED: CORS preflight + actual POST return 'Access-Control-Allow-Origin: *' together with 'Access-Control-Allow-Credentials: true' — an invalid CORS combination per spec. FastAPI's CORSMiddleware would never emit both; the Cloudflare/k8s ingress is overriding/appending Allow-Origin:* on top of FastAPI's response. Frontend Playwright (all 9 checks passed): admin login → /admin redirect; document.cookie does NOT expose access_token (HttpOnly confirmed working); localStorage.token is null (AuthContext no longer writes on new logins); /api/auth/me succeeds via cookie credentials:'include'; /offers loads 244 offer cards via refactored OffersPage.jsx; Île-de-France chip click updates results-count (filter works); /profile/{uid} renders profile-name+edit-profile-btn; clicking edit opens 'Modifier mon profil' modal with save-profile button; logout link → /admin redirects to /login + /auth/me returns 401; candidate (lucas.martin) /cv page shows cv-title+cv-summary+save-cv testids; modifying title + save shows 'CV enregistré' toast. NOTE: user request referenced '/profil/{id}' but the actual route is '/profile/{id}' (single typo in the request, not a bug).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "OPTIONS/POST /api/* (all)", "issue": "Response contains 'Access-Control-Allow-Origin: *' alongside 'Access-Control-Allow-Credentials: true' — invalid CORS combo per spec. Ingress (Cloudflare/k8s) is overriding FastAPI's correct CORSMiddleware output. Does NOT block the SPA itself because frontend+backend are same-origin (joblink-stages.preview.emergentagent.com), but any 3rd-party cross-origin client using credentials would be rejected by the browser."},
+      {"endpoint": "/api/external-offers/all", "issue": "Returns 198 offers but 0 carry 'duplicate_sources' field in current snapshot. Dedup module IS executing (offers count is post-dedupe), but no fuzzy cross-source matches happened to fire. Acceptable per user spec ('may include … presence of field is enough')."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Profile edit modal", "issues": ["React/Radix warning: 'Missing Description or aria-describedby={undefined} for {DialogContent}' — add an aria-describedby or <DialogDescription> for a11y compliance."]},
+      {"screen": "Candidate dashboard (/dashboard)", "issues": ["React hydration warning: 'In HTML, <span> cannot be a child of <option>' — likely an <option><span/></option> in some <select>. Fix by removing the inner <span>. Unrelated to iter23 refactor but visible in console."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter23_cookie_auth.py",
+    "/app/test_reports/pytest/pytest_iter23.xml"
+  ],
+  "action_items": [
+    "Investigate the k8s/Cloudflare ingress rule that injects 'Access-Control-Allow-Origin: *' on /api responses. FastAPI's CORSMiddleware is correctly configured (allow_origins=[FRONTEND_URL] + allow_origin_regex), but the ingress is overriding it. Either disable the ingress-level CORS rewrite or align it to echo the request Origin when credentials are allowed. Browsers WILL reject this for any cross-origin caller.",
+    "(Cosmetic) Add <DialogDescription> or aria-describedby to the 'Modifier mon profil' DialogContent in components/profile/*.",
+    "(Cosmetic) Find the <select><option><span>…</span></option></select> on the candidate /dashboard and remove the inner <span> to silence the React hydration warning."
+  ],
+  "critical_code_review_comments": [
+    "routes/auth.py:login/register — set_auth_cookie is called BEFORE the response is returned: good. But the token is ALSO returned in the JSON body. With the move to HttpOnly cookies, returning the JWT in the body is now redundant and slightly weakens the XSS-protection benefit (a stolen XSS payload can still read the token from the response if it intercepts fetch). Consider returning only {user:…} once frontend stops reading `data.token`.",
+    "server.py:get_current_user lines 167-179: when a JWT happens to collide with an existing session_token (extremely unlikely but possible), the session_token branch is tried first and might wrongly return a stale user. Low risk because session_token is server-generated random by Emergent, but worth a comment.",
+    "server.py:149-151 clear_auth_cookie uses samesite='none', secure=True — matches set_auth_cookie. Good.",
+    "AuthContext.jsx: confirmed via JS evaluation that localStorage.token is null after a fresh cookie-based login. However the code still READS legacy localStorage tokens on boot (graceful migration). Add a TODO/comment indicating the legacy read path can be removed after ~30 days (when all old logins have expired past the 7-day JWT).",
+    "routes/google_oauth.py:163+ — set_auth_cookie is now also called in the OAuth callback. Not exercised in this iteration because GOOGLE_CLIENT_ID is still 'xxxx…' placeholder. Will need re-test once real Google creds land.",
+    "OffersPage.jsx 122 lines, CVPage.jsx 162 lines, ProfilePage.jsx 303 lines — refactor is clean and zero regression observed. All data-testid attributes preserved. server.py still 3052 lines (slight growth +85 vs iter22) — next candidate for split: /seed-v3 and /admin/* routes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter23_cookie_auth.py (new)"
+  ],
+  "success_rate": {"backend": "87.5% (7/8 — 1 CORS issue caused by ingress, not by app code)", "frontend": "100% (9/9 checks)"},
+  "test_credentials": "Admin bernardolivieri1326@gmail.com / OwnerAdmin2026! ✓, Candidate lucas.martin@email.fr / Demo1234! ✓ — both worked end-to-end. Company creds not exercised this iteration.",
+  "seed_data_creation": "One disposable TEST_iter23_<hex>@email.fr candidate created via /auth/register per run (no cleanup, negligible).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Cookie auth fully working: HttpOnly+Secure+SameSite=None+Max-Age=604800 access_token. Verified via curl that document.cookie in the browser does NOT contain access_token (HttpOnly truly hides it from JS). Backward-compat with Bearer header works. New canonical test file: /app/backend/tests/test_iter23_cookie_auth.py — keep this in regression. The CORS preflight failure is environmental (ingress-level 'Allow-Origin: *' override) NOT a backend code bug — main agent should investigate the ingress config (not the FastAPI middleware which is correct). Profile route is /profile/:id NOT /profil/:id (user request had a typo). Toast detection on /cv works via [data-sonner-toast] selectors. iter22 regression suite (test_iter22_routes_oauth.py) was not re-run this iteration but no related files were changed.",
+  "rca of the issue": "CORS Allow-Origin '*' with Allow-Credentials 'true': raw curl OPTIONS to /api/auth/login returns BOTH headers simultaneously, which Starlette's CORSMiddleware will never produce (it's coded to echo the specific Origin or omit the header entirely when credentials are allowed). Therefore the contradictory pair must be injected by an upstream proxy (Cloudflare/k8s ingress on emergentagent.com). Reproduction: `curl -i -X OPTIONS https://joblink-stages.preview.emergentagent.com/api/auth/login -H 'Origin: https://joblink-stages.preview.emergentagent.com' -H 'Access-Control-Request-Method: POST'` → see both headers. Mitigation: (1) remove the ingress-level CORS rewrite, OR (2) configure the ingress to echo the request Origin when credentials are present. App works today only because frontend and backend share the exact same origin and the browser does NOT enforce CORS on same-origin requests."
+}

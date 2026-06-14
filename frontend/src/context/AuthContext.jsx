@@ -3,17 +3,21 @@ import api from "../lib/api";
 
 const AuthContext = createContext(null);
 
+/**
+ * Auth lifecycle:
+ *  - JWT lives in an HttpOnly `access_token` cookie set by /auth/login,
+ *    /auth/register and /auth/google/callback (XSS-safe).
+ *  - For backwards compatibility we still read any legacy token from
+ *    localStorage and send it as Authorization Bearer; new sessions never
+ *    write to localStorage.
+ *  - On mount we always call /auth/me — the browser will send the cookie
+ *    automatically (axios is configured with withCredentials=true).
+ */
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
-    // Avoid harmless 401 noise: only call /me if a token or session cookie likely exists
-    if (!localStorage.getItem("token") && !document.cookie.includes("session_token")) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
@@ -25,16 +29,17 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    // Google OAuth (custom) returns the JWT in URL fragment "#token=…"
+    // Legacy custom-Google-OAuth flow returns the JWT in URL fragment "#token=…"
+    // We still honor it (writes to localStorage) until that path is fully retired.
     if (typeof window !== "undefined" && window.location.hash?.includes("token=")) {
       const params = new URLSearchParams(window.location.hash.slice(1));
       const t = params.get("token");
       if (t) {
         localStorage.setItem("token", t);
-        // Clean the URL so the token isn't kept in the visible address bar
         window.history.replaceState({}, "", window.location.pathname + window.location.search);
       }
     }
+    // Emergent Google session pathway — handled by /auth/session flow.
     if (window.location.hash?.includes("session_id=")) {
       setLoading(false);
       return;
@@ -44,20 +49,27 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
-    localStorage.setItem("token", data.token);
+    // Cookie is the source of truth; legacy localStorage write removed.
+    // (We still keep what's there if the browser hasn't migrated yet — login
+    // overwrites by setting the new HttpOnly cookie via Set-Cookie.)
+    localStorage.removeItem("token");
     setUser(data.user);
     return data.user;
   };
 
   const register = async (payload) => {
     const { data } = await api.post("/auth/register", payload);
-    localStorage.setItem("token", data.token);
+    localStorage.removeItem("token");
     setUser(data.user);
     return data.user;
   };
 
   const logout = async () => {
-    try { await api.post("/auth/logout"); } catch (err) { console.warn("logout API failed (continuing local logout):", err?.message || err); }
+    try {
+      await api.post("/auth/logout");
+    } catch (err) {
+      console.warn("logout API failed (continuing local logout):", err?.message || err);
+    }
     localStorage.removeItem("token");
     setUser(null);
     window.location.href = "/";
@@ -67,7 +79,9 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
-    } catch (err) { console.warn("refreshUser failed:", err?.message || err); }
+    } catch (err) {
+      console.warn("refreshUser failed:", err?.message || err);
+    }
   };
 
   return (
