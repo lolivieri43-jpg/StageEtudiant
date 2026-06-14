@@ -25,7 +25,39 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
-## Iteration 26 (2026-03-02) — Déduplication fuzzy cross-source (P1)
+## Iteration 27 (2026-03-02) — JWT HttpOnly cookies + Refactor des grandes pages (P2)
+
+### Sécurité — JWT en cookies HttpOnly
+- ✅ **Backend `/app/backend/server.py`** : nouvelles helpers `set_auth_cookie()` / `clear_auth_cookie()` qui écrivent un cookie `access_token` HttpOnly + Secure + SameSite=None + Max-Age 7j (XSS-safe).
+- ✅ **`get_current_user`** : lit token dans l'ordre `Authorization: Bearer` → cookie `access_token` (nouveau) → cookie `session_token` (legacy Emergent). Backwards compat préservée pour curl/tests/mobile.
+- ✅ **`routes/auth.py`** : `register` / `login` acceptent `Response` et appellent `set_auth_cookie`. `logout` efface les deux cookies.
+- ✅ **`routes/google_oauth.py`** : le callback OAuth pose AUSSI le cookie HttpOnly (en plus du fragment `#token=` pour rétro-compat).
+- ✅ **CORS** : `allow_origins=[FRONTEND_URL]` + `allow_origin_regex=https://.*\.(emergentagent\.com|stageetudiant\.com)$` quand `FRONTEND_URL` est défini, sinon `*`.
+- ✅ **Frontend `AuthContext.jsx`** : ne fait plus `localStorage.setItem("token")` sur les nouveaux logins. Le cookie HttpOnly fait foi. La lecture legacy (`localStorage.getItem`) reste pour la migration douce.
+- ✅ **Validation curl** : `curl -c c.txt -X POST /api/auth/login` → 200 + cookie `Set-Cookie: access_token=…; HttpOnly; Secure; SameSite=none; Max-Age=604800`. `curl -b c.txt /api/auth/me` → user retourné sans header Authorization.
+- ⚠️ **CORS infra** : ingress K8s/CF injecte `Access-Control-Allow-Origin: *` par-dessus le header de FastAPI. Sans impact sur la SPA car le frontend et le backend partagent le même origin. À corriger côté ingress pour les clients tiers cross-origin.
+
+### Refacto — découpage des grandes pages
+- ✅ **`OffersPage.jsx`** : 469 → 122 lignes. Extrait dans :
+  - `components/offers/OffersFiltersSidebar.jsx` (186 l)
+  - `components/offers/OffersRegionChips.jsx` (30 l)
+  - `components/offers/OffersResults.jsx` (37 l)
+  - `hooks/useOfferSearch.js` (127 l) — encapsule la logique de fetch multi-source
+  - `lib/offerFilters.js` (65 l) — helpers URL ↔ draft + constantes REGIONS_LIST/SOURCES
+- ✅ **`CVPage.jsx`** : 448 → 162 lignes. Extrait dans :
+  - `components/cv/CVPrimitives.jsx` (91 l) — `Section`, `Field`, `AIButton`, `SkillsEditor`, `CoverLetterAI`
+  - `components/cv/CVSections.jsx` (281 l) — 8 sections (VisibilityCard, MainInfo, SummaryBlock, Experiences, Educations, Skills, LanguagesBlock, Projects, Certifications)
+  - Tous les data-testid préservés, prop-bag `ed` partage les helpers (`upd`, `updArr`, `addItem`, `removeItem`, `aiAssist`).
+- ✅ **`ProfilePage.jsx`** : 471 → 303 lignes. Extrait dans :
+  - `components/profile/ProfileEditDialog.jsx` (102 l) — dialog d'édition entreprise/candidat
+  - `components/profile/ProfileMediaBlocks.jsx` (77 l) — `HiddenFileButton`, `ProfileGallery`, `ProfileDocuments`
+- ✅ **Test agent iter23** : 9/9 checks frontend, 7/8 backend (la 1 fail = CORS ingress). Zéro régression visuelle/fonctionnelle.
+
+### Différé
+- 📧 **Email verification + mot de passe oublié** (P2) : nécessite la clé `RESEND_API_KEY` que l'utilisateur n'a pas encore fournie. Le playbook auth est prêt côté backend (`/api/auth/forgot-password` + `/api/auth/reset-password` à ajouter ensuite).
+
+
+
 - ✅ **Nouveau module `/app/backend/dedup.py`** : fonction pure `dedupe_offers(offers)` qui :
   1. Pass 1 — dédup exact par `external_url` / `offer_id`.
   2. Pass 2 — fuzzy fingerprint `(company normalisée, set de tokens de titre canoniques, ville normalisée)`. Strip des accents, suffixes de société (SA, SAS, GmbH…), tokens bruyants (H/F, mois, ans, fr…).
