@@ -25,7 +25,21 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
-## Iteration 25 (2026-03-01) — Carte du monde interactive (Leaflet + Geoapify)
+## Iteration 26 (2026-03-02) — Déduplication fuzzy cross-source (P1)
+- ✅ **Nouveau module `/app/backend/dedup.py`** : fonction pure `dedupe_offers(offers)` qui :
+  1. Pass 1 — dédup exact par `external_url` / `offer_id`.
+  2. Pass 2 — fuzzy fingerprint `(company normalisée, set de tokens de titre canoniques, ville normalisée)`. Strip des accents, suffixes de société (SA, SAS, GmbH…), tokens bruyants (H/F, mois, ans, fr…).
+  3. Garde l'offre la mieux scorée (priority source > URL > logo > coords > salaire > taille description) et annote `duplicate_sources` + `duplicate_count` pour transparence.
+- ✅ **Intégré dans 3 points d'agrégation** :
+  - `external_sources.fetch_all_keyless` (Arbeitnow, Remotive, RemoteOK, Jobicy, Ashby, Greenhouse)
+  - `external_keyed.fetch_all_keyed` (Adzuna, Jooble, EURES)
+  - `server.get_all_external_offers` (merge cross-bucket keyless ↔ keyed)
+- ✅ **UI** : `OfferCard.jsx` affiche en italique « Aussi sur : Jooble, Adzuna » sous la carte si l'offre a été fusionnée — testid `also-on-{offer_id}`.
+- ✅ **Tests unitaires `/app/backend/tests/test_dedup.py`** : 10/10 verts. Couvre dédup URL exact, fusion cross-source, séparation entreprises différentes, séparation villes différentes, priorité source la plus élevée gagne, signal insuffisant passe à travers, no-mutation de l'input.
+- 📊 **Effet observé sur le cache live** (sans France Travail/Jooble actifs) : 255 brut → 198 après dedup (57 doublons internes URL retirés). Le fuzzy se déclenchera massivement quand France Travail + Adzuna seront actifs ensemble.
+
+
+
 - ✅ **Intégration Geoapify** : `geocode_geoapify(db, query, country)` dans `geo_search.py` — provider mondial avec cache Mongo 30 j + logs API + negative cache 1 j sur résultats vides. Compte Geoapify free tier (3 000 req/jour).
 - ✅ **Endpoint `GET /api/offers-map`** (chemin évite collision avec `/offers/{id}`) : retourne uniquement les offres avec coordonnées valides, supporte filtres `country`, `city`, `contract_type`, `domain`, `q`. Réponse formatée pour la carte (id, title, company, city, country, lat, lon, contract_type, url).
 - ✅ **Auto-géocodage à la création** : la création d'offre déclenche `ensure_offer_coords()` (Geoapify → Nominatim → FR_CITIES), persiste `location.{latitude,longitude,city,postal_code,country}` + top-level `latitude/longitude`. Géocode une seule fois (idempotent).

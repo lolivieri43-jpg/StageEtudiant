@@ -2785,15 +2785,11 @@ async def get_all_external_offers(
     )
     keyless = keyless if isinstance(keyless, dict) else {"results": [], "by_source": {}}
     keyed = keyed if isinstance(keyed, dict) else {"results": [], "by_source": {}}
-    merged: list = []
-    seen: set = set()
-    for o in (keyless.get("results", []) + keyed.get("results", [])):
-        k = o.get("external_url") or o.get("offer_id")
-        if k and k in seen:
-            continue
-        if k:
-            seen.add(k)
-        merged.append(o)
+    # Cross-source dedupe (exact URL + fuzzy company/title/city). Already deduped
+    # within each orchestrator, but identical jobs can also appear across the
+    # keyless vs keyed buckets (e.g. Adzuna ↔ Greenhouse, Jooble ↔ Remotive).
+    from dedup import dedupe_offers as _dedupe
+    merged = _dedupe(keyless.get("results", []) + keyed.get("results", []))
 
     # Country / European filter
     if european_only or (country and normalize_text(country) == "europe"):

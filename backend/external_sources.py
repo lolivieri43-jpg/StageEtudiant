@@ -313,14 +313,9 @@ async def fetch_all_keyless(db, force_refresh: bool = False) -> Dict:
                 by_source[o["source"]] = by_source.get(o["source"], 0) + 1
             all_offers.extend(r)
 
-    # dedupe by external_url
-    seen, deduped = set(), []
-    for o in all_offers:
-        k = o.get("external_url") or o.get("offer_id")
-        if k in seen:
-            continue
-        seen.add(k)
-        deduped.append(o)
+    # Cross-source dedupe (exact URL + fuzzy company/title/city).
+    from dedup import dedupe_offers as _dedupe
+    deduped = _dedupe(all_offers)
 
     await db.external_offers_cache.update_one(
         {"key": "keyless_all"},

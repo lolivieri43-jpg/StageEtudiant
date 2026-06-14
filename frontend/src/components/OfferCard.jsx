@@ -85,6 +85,15 @@ export default function OfferCard({ offer }) {
           <ExternalLink className="w-3 h-3" />Ouvrir sur {sourceLabel}
         </div>
       )}
+      {Array.isArray(offer.duplicate_sources) && offer.duplicate_sources.length > 0 && (
+        <div
+          className="mt-2 text-[11px] text-slate-500 italic"
+          data-testid={`also-on-${offer.offer_id}`}
+          title="Cette offre est aussi publiée sur ces sources — nous l'avons fusionnée pour éviter les doublons."
+        >
+          Aussi sur : {offer.duplicate_sources.map(s => SOURCE_LABELS[s] || s).join(", ")}
+        </div>
+      )}
     </>
   );
 
