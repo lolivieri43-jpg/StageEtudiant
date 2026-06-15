@@ -25,7 +25,39 @@ Build a modern, professional, responsive French platform connecting companies wi
 - Notifications + dashboards par rôle
 - Espace admin (vérification entreprise, stats)
 
-## Iteration 27 (2026-03-02) — JWT HttpOnly cookies + Refactor des grandes pages (P2)
+## Iteration 28 (2026-03-02) — Email verification + Mot de passe oublié (P2)
+
+### Mode dev (sans Resend)
+- ✅ **`/app/backend/services/email.py`** : abstraction `send_email(to, subject, html, text)` qui :
+  - utilise Resend si `RESEND_API_KEY` est positionné (lazy import du SDK)
+  - sinon log le corps de l'email dans stdout (fallback dev, pas de blocage)
+  - retourne `{provider, ok, id?/error?}` — ne lève jamais sur échec provider.
+
+### Endpoints `/app/backend/routes/email_auth.py`
+- ✅ `POST /api/auth/forgot-password` — réponse **toujours 200** (anti-enumeration). Crée un token (`secrets.token_urlsafe(32)`) expirant à 1h dans `password_reset_tokens`. Envoie le lien via `send_email`.
+- ✅ `POST /api/auth/reset-password` — vérifie token (existe, non-utilisé, non-expiré), exige mot de passe ≥ 8 caractères, hash bcrypt, marque token consommé.
+- ✅ `POST /api/auth/send-verification` (auth requis) — supprime les anciens tokens du user, crée un nouveau (24h) dans `email_verification_tokens`, envoie le lien.
+- ✅ `GET /api/auth/verify-email?token=…` — flip `email_verified=True` + `email_verified_at`, marque token consommé.
+- ✅ `GET /api/admin/auth-tokens/recent` — debug admin uniquement (en attendant Resend) : retourne les 10 derniers tokens password_reset + email_verification + statut provider.
+- ✅ **TTL Mongo indexes** sur `password_reset_tokens.expires_at` et `email_verification_tokens.expires_at` → purge auto.
+
+### Frontend
+- ✅ `/forgot-password` (`ForgotPasswordPage.jsx`) — formulaire email + écran de succès. Toujours affiche le même message anti-enumération.
+- ✅ `/reset-password/:token` (`ResetPasswordPage.jsx`) — saisie + confirmation, validation client (8+ chars + match), succès → auto-redirect /login après 2.5s.
+- ✅ `/verify-email?token=…` (`VerifyEmailPage.jsx`) — appelle l'endpoint au mount, 3 états visuels (loading/ok/error).
+- ✅ `EmailVerificationBanner.jsx` — banner ambre sur `/dashboard` quand `!user.email_verified && user.provider !== 'google'`, avec bouton « Renvoyer le lien » → POST /auth/send-verification.
+- ✅ `LoginPage.jsx` — lien « Mot de passe oublié ? » ajouté sous le bouton de connexion.
+- ✅ Routes ajoutées dans `App.js`.
+
+### Cosmétique
+- ✅ `ProfileEditDialog.jsx` — ajouté `<DialogDescription className="sr-only">` (warning Radix a11y résolu).
+
+### Tests
+- ✅ **12/12 backend tests** (`/app/backend/tests/test_iter24_email_auth.py`) — anti-enumération, token unique, replay refusé, expiration, RBAC admin debug.
+- ✅ **10/10 frontend Playwright** — flow E2E complet : forgot → email log → reset page → login avec nouveau mot de passe → dashboard atteint. Banner verification + clic « renvoyer » → toast OK.
+
+
+
 
 ### Sécurité — JWT en cookies HttpOnly
 - ✅ **Backend `/app/backend/server.py`** : nouvelles helpers `set_auth_cookie()` / `clear_auth_cookie()` qui écrivent un cookie `access_token` HttpOnly + Secure + SameSite=None + Max-Age 7j (XSS-safe).
