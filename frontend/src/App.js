@@ -47,6 +47,9 @@ import AboutPage from "./pages/AboutPage";
 import AdminOfficialProfilePage from "./pages/AdminOfficialProfilePage";
 import ChooseRolePage from "./pages/ChooseRolePage";
 import MapPage from "./pages/MapPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
 
 const Protected = ({ children }) => {
   const { user, loading } = useAuth();
@@ -68,6 +71,9 @@ function AppRouter() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/new" element={<Protected><PublishOfferPage /></Protected>} />
         <Route path="/offers/:id" element={<OfferDetailPage />} />

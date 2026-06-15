@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import OfferCard from "../components/OfferCard";
 import ProfileViews from "../components/ProfileViews";
 import PlatformCounter from "../components/PlatformCounter";
+import EmailVerificationBanner from "../components/EmailVerificationBanner";
 
 const StatusBadge = ({ status }) => {
   const map = {
@@ -49,6 +50,8 @@ export default function DashboardPage() {
             <Link to="/offers/new"><Button className="rounded-full bg-blue-600 hover:bg-blue-700" data-testid="publish-offer-btn"><Plus className="w-4 h-4 mr-1" />Publier une offre</Button></Link>
           )}
         </div>
+
+        <EmailVerificationBanner user={user} />
 
         {user.role === "company" ? (
           <>

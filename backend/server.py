@@ -220,10 +220,12 @@ def clean_user(u: dict) -> dict:
 from routes.auth import register_auth_routes
 from routes.users import register_users_routes
 from routes.google_oauth import register_google_oauth_routes
+from routes.email_auth import register_email_auth_routes
 register_auth_routes(api, db, get_current_user, hash_password, verify_password,
                      create_jwt, clean_user, update_online, set_auth_cookie, clear_auth_cookie)
 register_users_routes(api, db, get_current_user, get_optional_user)
 register_google_oauth_routes(api, db, create_jwt, set_auth_cookie)
+register_email_auth_routes(api, db, get_current_user, hash_password)
 
 
 @api.post("/auth/choose-role")
@@ -1327,6 +1329,11 @@ async def ensure_indexes():
         await db.oauth_states.create_index([("state", 1)], unique=True)
         await db.oauth_states.create_index("created_at", expireAfterSeconds=600)
         await db.users.create_index([("google_id", 1)], sparse=True)
+        # Email auth (verification + password reset) — TTL on expires_at + lookup by token.
+        await db.password_reset_tokens.create_index("token", unique=True)
+        await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
+        await db.email_verification_tokens.create_index("token", unique=True)
+        await db.email_verification_tokens.create_index("expires_at", expireAfterSeconds=0)
         logger.info("Mongo indexes ensured")
     except Exception as e:
         logger.warning(f"Index creation failed: {e}")

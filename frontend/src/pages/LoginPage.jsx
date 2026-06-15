@@ -58,6 +58,11 @@ export default function LoginPage() {
           <Button type="submit" disabled={loading} className="w-full rounded-xl bg-blue-600 hover:bg-blue-700 h-11" data-testid="login-submit">
             {loading ? "Connexion..." : "Se connecter"}
           </Button>
+          <div className="text-right">
+            <Link to="/forgot-password" className="text-xs text-blue-600 font-semibold hover:underline" data-testid="forgot-password-link">
+              Mot de passe oublié ?
+            </Link>
+          </div>
         </form>
 
         <div className="my-6 flex items-center gap-3 text-xs text-slate-400">

@@ -3,7 +3,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import SiretLookup from "../SiretLookup";
 import { DIPLOMA_LEVELS } from "../../lib/diplomas";
 
@@ -23,7 +23,12 @@ export default function ProfileEditDialog({ open, onOpenChange, isCompany, form,
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[80vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Modifier mon profil</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Modifier mon profil</DialogTitle>
+          <DialogDescription className="sr-only">
+            Mettez à jour les informations affichées sur votre profil public.
+          </DialogDescription>
+        </DialogHeader>
         <div className="space-y-3">
           {isCompany ? (
             <>

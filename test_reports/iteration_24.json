@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 24 — password reset + email verification flows end-to-end validated. Backend pytest 12/12 PASSED. Frontend Playwright 10/10 checks PASSED including a real end-to-end reset (token generated → page navigated → success screen → auto-redirect to /login → login with new password succeeds → dashboard reached). Email service correctly falls back to console provider when RESEND_API_KEY is absent (delivery.provider='console', delivery.ok=true). Admin debug endpoint /api/admin/auth-tokens/recent is properly RBAC-protected (candidate gets 403). DialogDescription a11y warning gone from ProfileEditDialog.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_email_auth.py",
+    "/app/test_reports/pytest/pytest_iter24.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/email.py — `send_email` swallows Resend exceptions and returns {ok:false,error}. Good for never breaking the token-creation flow; consider an alert/metric counter for production so silent failures surface.",
+    "routes/email_auth.py:_frontend_origin — falls back to request host header when FRONTEND_URL is unset. Behind a CDN/proxy this can produce wrong links if Host header is stripped. Setting FRONTEND_URL explicitly in /app/backend/.env would harden this for production.",
+    "routes/email_auth.py — `EmailStr` from pydantic-email-validator rejects some valid-but-uncommon TLDs (e.g., .test, .local), so consider documenting that frontend client-side validation must mirror this strictness. Anti-enumeration guarantee is preserved (200 returned) but 422 on syntactically invalid emails is still possible — frontend already shows toast on err.response.detail.",
+    "routes/email_auth.py:list_recent_tokens — exposes raw tokens to any admin; given they're single-use and short-lived this is acceptable. Keep gated to admin only.",
+    "EmailVerificationBanner.jsx — `setSent(true)` is permanent (no re-arm). If user wants to resend after a previous attempt, they must reload. Cheap improvement: re-enable button after 60s with a 'Renvoyer à nouveau' label.",
+    "ResetPasswordPage.jsx — does not pre-validate token existence on mount. User with an invalid/expired link only sees the error after submitting. Optional: GET /api/auth/check-reset-token?token=… on mount and short-circuit to an explicit invalid-link screen.",
+    "server.py keeps growing (~3000+ lines) per iter23 review. routes/email_auth.py is correctly split out — good pattern."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter24_email_auth.py (new — 12 tests)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (10/10 incl. real E2E reset)"},
+  "test_credentials": "Admin bernardolivieri1326@gmail.com / OwnerAdmin2026! ✓, Candidate lucas.martin@email.fr / Demo1234! ✓, emma.dubois@email.fr / Demo1234! used for E2E reset (password was temporarily changed to EmmaNewPass2026! then restored back to Demo1234! at test end).",
+  "seed_data_creation": "Two disposable users were created via /api/auth/register inside the test (test_reset_<hex>@example.com, test_verify_<hex>@example.com). No cleanup; negligible. lucas.martin email_verified flag was NOT flipped (banner test only sent the token; verify step uses the disposable user).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Email service is in CONSOLE/dev mode (RESEND_API_KEY unset). Real outbound emails are MOCKED — links are only logged to backend stdout. To retrieve a token outside of /admin/auth-tokens/recent: `tail -n 200 /var/log/supervisor/backend.err.log | grep -E 'reset-password/|verify-email\\?token='`. Backend test file /app/backend/tests/test_iter24_email_auth.py is now the canonical regression for these flows. The anti-enumeration contract is verified (unknown email → 200 with same ok:true payload, no token row). EmailStr rejects some uncommon TLDs (.test) with 422 — frontend should keep simple HTML5 type=email validation which is more permissive but UX-fine. lucas.martin still has email_verified=null after this iteration (verify token was sent but not consumed). If a later iteration expects email_verified=true for lucas, re-run the verify step. Reset token TTL = 1h, verify token TTL = 24h, both stored in MongoDB with TTL indexes set in server.py ensure_indexes.",
+  "rca of the issue": "No issues found."
+}
