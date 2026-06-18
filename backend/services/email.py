@@ -15,16 +15,17 @@ logger = logging.getLogger(__name__)
 
 
 def _resend_configured() -> bool:
-    key = os.environ.get("RESEND_API_KEY", "").strip()
-    return bool(key) and not key.startswith("xxxx")
+    from config import resend_api_key
+    return bool(resend_api_key())
 
 
 def email_provider_status() -> dict:
     """Returns a small JSON-friendly status used by the admin debug endpoint."""
+    from config import resend_from_email
     return {
         "configured": _resend_configured(),
         "provider": "resend" if _resend_configured() else "console",
-        "from": os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev"),
+        "from": resend_from_email(),
     }
 
 
@@ -58,8 +59,9 @@ async def send_email(
         logger.error("resend package not installed but RESEND_API_KEY is set")
         return {"provider": "resend", "ok": False, "error": "sdk_not_installed"}
 
-    resend.api_key = os.environ["RESEND_API_KEY"]
-    sender = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+    import config as config_module
+    resend.api_key = config_module.resend_api_key()
+    sender = config_module.resend_from_email()
     try:
         result = resend.Emails.send({
             "from": sender,

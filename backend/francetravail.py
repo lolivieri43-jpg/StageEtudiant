@@ -41,8 +41,9 @@ _token_cache: Dict[str, object] = {"token": None, "exp": None}
 
 
 async def _get_token() -> Optional[str]:
-    cid = os.environ.get("FT_CLIENT_ID")
-    sec = os.environ.get("FT_CLIENT_SECRET")
+    from config import france_travail_client_id, france_travail_client_secret
+    cid = france_travail_client_id()
+    sec = france_travail_client_secret()
     if not cid or not sec:
         logger.error("FT credentials missing")
         return None

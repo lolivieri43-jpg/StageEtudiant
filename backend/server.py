@@ -1339,8 +1339,7 @@ async def ensure_indexes():
         logger.warning(f"Index creation failed: {e}")
 
 # ============ ITERATION 5: REAL FRANCE TRAVAIL CONNECTOR ============
-FT_CLIENT_ID = os.environ.get("FRANCE_TRAVAIL_CLIENT_ID")
-FT_CLIENT_SECRET = os.environ.get("FRANCE_TRAVAIL_CLIENT_SECRET")
+import config
 FT_TOKEN_URL = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
 FT_SEARCH_URL = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
 _ft_token_cache = {"token": None, "expires_at": None}
@@ -1349,11 +1348,13 @@ async def get_france_travail_token():
     now = datetime.now(timezone.utc)
     if _ft_token_cache["token"] and _ft_token_cache["expires_at"] > now:
         return _ft_token_cache["token"]
-    if not FT_CLIENT_ID or not FT_CLIENT_SECRET:
+    cid = config.france_travail_client_id()
+    sec = config.france_travail_client_secret()
+    if not cid or not sec:
         raise HTTPException(503, "France Travail non configuré (FRANCE_TRAVAIL_CLIENT_ID/SECRET requis)")
     r = requests.post(FT_TOKEN_URL, data={
         "grant_type": "client_credentials",
-        "client_id": FT_CLIENT_ID, "client_secret": FT_CLIENT_SECRET,
+        "client_id": cid, "client_secret": sec,
         "scope": "api_offresdemploiv2 o2dsoffre",
     }, timeout=15)
     r.raise_for_status()
@@ -1364,7 +1365,7 @@ async def get_france_travail_token():
 
 class FranceTravailRealConnector(ExternalConnector):
     name = "FranceTravail"
-    enabled = bool(FT_CLIENT_ID and FT_CLIENT_SECRET)
+    enabled = bool(config.france_travail_client_id() and config.france_travail_client_secret())
     api_endpoint = "https://candidat.francetravail.fr"
 
     async def fetch(self, query="", location="", limit=20):
@@ -1960,10 +1961,11 @@ async def export_application_cv(app_id: str, template: Optional[str] = None, use
 # ============ AI ASSISTANT ============
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-async def call_ai(system_prompt: str, user_prompt: str, model: str = "gpt-4o-mini") -> str:
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+async def call_ai(system_prompt: str, user_prompt: str, model: Optional[str] = None) -> str:
+    api_key = config.openai_api_key()
     if not api_key:
-        raise HTTPException(503, "Service IA indisponible (clé manquante)")
+        raise HTTPException(503, "Service IA indisponible (OPENAI_API_KEY ou EMERGENT_LLM_KEY requis)")
+    model = model or config.ai_search_model()
     session_id = f"cv_{uuid.uuid4().hex[:8]}"
     chat = LlmChat(api_key=api_key, session_id=session_id, system_message=system_prompt).with_model("openai", model)
     msg = UserMessage(text=user_prompt)
@@ -2115,6 +2117,20 @@ async def admin_platform_stats(user=Depends(get_current_user)):
     }
     real_count = await db.applications.count_documents({"status": {"$in": list(OBTAINED_STATUSES)}})
     return {**settings, "real_obtained_count": real_count}
+
+
+@api.get("/admin/env-check")
+async def admin_env_check(user=Depends(get_current_user)):
+    """Diagnostic des variables d'environnement (admin uniquement).
+
+    Retourne uniquement OK / MANQUANT par variable — **aucune valeur n'est exposée**.
+    Pour chaque variable on indique aussi `picked_from` (l'alias effectivement
+    utilisé) afin d'identifier les déploiements qui s'appuient encore sur les
+    anciens noms (ex: FT_CLIENT_ID au lieu de FRANCE_TRAVAIL_CLIENT_ID).
+    """
+    if user["role"] != "admin":
+        raise HTTPException(403, "Réservé aux admins")
+    return config.env_diagnostic()
 
 
 @api.put("/admin/platform-stats")
@@ -2987,7 +3003,7 @@ app.include_router(ext_offers_api)
 
 # CORS — browsers reject "*" when allow_credentials=True. Read the exact frontend
 # origin from env (set by the deployment), default to the current preview host.
-_frontend_url = os.environ.get("FRONTEND_URL", "").strip()
+_frontend_url = config.frontend_url() or ""
 _allow_origins = [_frontend_url] if _frontend_url else ["*"]
 # Allow the platform's preview/production hosts in addition to the explicit one
 # so curl-from-anywhere keeps working in dev. The browser will still enforce

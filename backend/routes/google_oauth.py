@@ -32,19 +32,30 @@ GOOGLE_SCOPES = "openid email profile"
 
 
 def _build_redirect_uri(request: Request) -> str:
-    """Compute the callback URL from the current request — never hardcoded.
-    Forces HTTPS to match the production setup (Cloudflare/K8s ingress always TLS-terminates)."""
+    """Compute the callback URL. Explicit GOOGLE_REDIRECT_URI wins (production
+    deployments behind a CDN need this pinned), otherwise derive from the
+    live request host. HTTPS is forced — the ingress always TLS-terminates."""
+    import config
+    override = config.google_redirect_uri()
+    if override:
+        return override
     host = request.headers.get("host") or request.url.netloc
     return f"https://{host}/api/auth/google/callback"
 
 
 def register_google_oauth_routes(api_router, db, create_jwt, set_auth_cookie):
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    frontend_url = os.environ.get("FRONTEND_URL", "")
+    import config as _config
+
+    def _client_id() -> str:
+        return _config.google_client_id() or ""
+
+    def _client_secret() -> str:
+        return _config.google_client_secret() or ""
 
     def _is_configured() -> bool:
-        return bool(client_id) and bool(client_secret) and not client_id.startswith("xxxx")
+        cid = _client_id()
+        sec = _client_secret()
+        return bool(cid) and bool(sec) and not cid.startswith("xxxx")
 
     @api_router.get("/auth/google")
     async def google_login(request: Request):
@@ -61,7 +72,7 @@ def register_google_oauth_routes(api_router, db, create_jwt, set_auth_cookie):
         redirect_uri = _build_redirect_uri(request)
         params = {
             "response_type": "code",
-            "client_id": client_id,
+            "client_id": _client_id(),
             "redirect_uri": redirect_uri,
             "scope": GOOGLE_SCOPES,
             "access_type": "online",
@@ -72,9 +83,9 @@ def register_google_oauth_routes(api_router, db, create_jwt, set_auth_cookie):
         return RedirectResponse(url, status_code=302)
 
     async def _resolve_frontend_url(request: Request) -> str:
-        # Prefer the explicit FRONTEND_URL when host matches, otherwise use the request host.
+        # Prefer the explicit FRONTEND_URL when set, otherwise use the request host.
         host = request.headers.get("host") or request.url.netloc
-        return frontend_url or f"https://{host}"
+        return _config.frontend_url() or f"https://{host}"
 
     @api_router.get("/auth/google/callback")
     async def google_callback(request: Request):
@@ -96,8 +107,8 @@ def register_google_oauth_routes(api_router, db, create_jwt, set_auth_cookie):
         async with httpx.AsyncClient(timeout=15.0) as client:
             tok_resp = await client.post(GOOGLE_TOKEN_URL, data={
                 "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
+                "client_id": _client_id(),
+                "client_secret": _client_secret(),
                 "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             })

@@ -28,7 +28,8 @@ VERIFY_TOKEN_TTL_HOURS = 24
 
 
 def _frontend_origin(request: Request) -> str:
-    explicit = os.environ.get("FRONTEND_URL", "").strip()
+    import config
+    explicit = config.frontend_url()
     if explicit:
         return explicit
     host = request.headers.get("host") or request.url.netloc
