@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, ArrowRight, CheckCircle2, Sparkles, TrendingUp, Users, Briefcase } from "lucide-react";
+import { Search, ArrowRight, CheckCircle2, Sparkles, TrendingUp, Users, Briefcase, Mail } from "lucide-react";
 import { Button } from "../components/ui/button";
 import FranceMap from "../components/FranceMap";
 import OfferCard from "../components/OfferCard";
@@ -278,11 +278,14 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 text-center text-sm">
           <div className="font-black text-white text-lg mb-2">StageEtudiant</div>
           <p>© 2026 — La plateforme française du stage et de l'alternance</p>
-          <div className="flex justify-center gap-4 mt-3 text-xs">
+          <div className="flex justify-center flex-wrap gap-4 mt-3 text-xs">
             <Link to="/a-propos" className="hover:text-white" data-testid="footer-about-link">À propos</Link>
             <Link to="/offers" className="hover:text-white">Offres</Link>
             <Link to="/companies" className="hover:text-white">Entreprises</Link>
             <Link to="/deals" className="hover:text-white">Bons plans</Link>
+            <a href="mailto:contact@stageetudiant.com" className="hover:text-white inline-flex items-center gap-1" data-testid="footer-contact-link">
+              <Mail className="w-3 h-3" />Nous contacter
+            </a>
           </div>
         </div>
       </footer>

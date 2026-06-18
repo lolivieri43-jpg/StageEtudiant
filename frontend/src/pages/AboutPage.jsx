@@ -4,7 +4,7 @@ import api from "../lib/api";
 import {
   GraduationCap, Briefcase, Building2, MessageSquare, Search,
   Sparkles, MapPin, FileText, Heart, Globe2, Shield, Users,
-  ArrowRight,
+  ArrowRight, Mail,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import PremiumBadge from "../components/PremiumBadge";
@@ -132,6 +132,20 @@ export default function AboutPage() {
               </div>
             ))}
           </div>
+        </Section>
+
+        {/* Contact section */}
+        <Section title="Nous contacter" icon={Mail} accent="violet">
+          <p className="text-slate-700 dark:text-slate-300 mb-4">
+            Une question, un retour, un partenariat ? Notre équipe vous répond rapidement.
+          </p>
+          <a
+            href="mailto:contact@stageetudiant.com"
+            className="inline-flex items-center gap-2 rounded-full bg-violet-600 hover:bg-violet-700 text-white font-semibold px-5 h-11 transition"
+            data-testid="about-contact-mailto"
+          >
+            <Mail className="w-4 h-4" />contact@stageetudiant.com
+          </a>
         </Section>
 
         {/* CTA */}
