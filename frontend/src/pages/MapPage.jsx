@@ -181,7 +181,7 @@ export default function MapPage() {
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &middot; Geocoding by <a href="https://www.geoapify.com/">Geoapify</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{y}/{x}.png"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               <FitOnResults results={results} />
               <MarkerClusterGroup chunkedLoading maxClusterRadius={50}>
