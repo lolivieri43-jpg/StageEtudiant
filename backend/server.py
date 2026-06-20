@@ -2440,9 +2440,18 @@ async def ai_search(body: dict, user=Depends(get_optional_user)):
     except Exception as e:
         logger.error(f"AI search error: {e}")
         raise HTTPException(500, "Erreur IA")
+    # `call_ai` normally returns a string but some provider/SDK versions return
+    # a dict like {"content": "..."} or a structured chunk. Coerce to string
+    # defensively so the regex below never crashes (VPS prod hit this).
+    if isinstance(raw, dict):
+        raw = raw.get("content") or raw.get("text") or ""
+    elif raw is None:
+        raw = ""
+    elif not isinstance(raw, str):
+        raw = str(raw)
     # Parse JSON (tolerant)
     import re, json as _json
-    m = re.search(r"\{[\s\S]+\}", raw or "")
+    m = re.search(r"\{[\s\S]+\}", raw)
     criteria = {}
     if m:
         try: criteria = _json.loads(m.group(0))
@@ -2455,7 +2464,7 @@ async def ai_search(body: dict, user=Depends(get_optional_user)):
             "user_role": (user or {}).get("role"),
             "query_text": text,
             "criteria": criteria,
-            "raw": (raw or "")[:1000],
+            "raw": raw[:1000],
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     except Exception:
